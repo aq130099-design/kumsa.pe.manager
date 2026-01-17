@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>금사초등학교 통합 체육 관리 시스템</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Pretendard:wght@400;500;600;700&display=swap">
+    <script src="https://cdn.jsdelivr.net/npm/lucide@latest/dist/umd/lucide.min.js"></script>
+</head>
+
+<body>
+    <div class="app-container">
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <div class="logo">
+                <i data-lucide="dumbbell"></i>
+                <span>금사초 체육관리</span>
+            </div>
+            <nav>
+                <button class="nav-item active" data-tab="dashboard">
+                    <i data-lucide="layout-dashboard"></i> 대시보드
+                </button>
+                <button class="nav-item" data-tab="timetable">
+                    <i data-lucide="calendar"></i> 시간표 관리
+                </button>
+                <button class="nav-item" data-tab="inventory">
+                    <i data-lucide="package"></i> 비품/대여 관리
+                </button>
+                <button class="nav-item" data-tab="requests">
+                    <i data-lucide="shopping-bag"></i> 구매 요청
+                </button>
+                <button class="nav-item" data-tab="repairs">
+                    <i data-lucide="wrench"></i> 수리 요청
+                </button>
+                <button class="nav-item" data-tab="bugs">
+                    <i data-lucide="bug"></i> 버그 수정 요청
+                </button>
+                <button class="nav-item" data-tab="adminManage" id="adminManageSidebarBtn" style="display: none;">
+                    <i data-lucide="shield"></i> 관리자 관리
+                </button>
+            </nav>
+            <div class="sidebar-footer">
+                <div class="admin-toggle">
+                    <span>관리자 모드</span>
+                    <label class="switch">
+                        <input type="checkbox" id="adminModeToggle">
+                        <span class="slider round"></span>
+                    </label>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="content">
+            <header>
+                <h1 id="pageTitle">대시보드</h1>
+                <div class="user-info">
+                    <span class="date" id="currentDateDisplay">2026. 01. 17 (토)</span>
+                </div>
+            </header>
+
+            <section id="dashboard" class="tab-content active">
+                <div class="stats-grid" id="dashboardStatsGrid" style="display: none;">
+                    <div class="stat-card" onclick="showPendingApprovalsModal()" style="cursor: pointer;">
+                        <h3>대기중인 시간표 승인</h3>
+                        <p class="value alarm" id="statPendingApprovals">0건</p>
+                    </div>
+                    <div class="stat-card" onclick="showUnreturnedItemsModal()" style="cursor: pointer;">
+                        <h3>미반납 비품</h3>
+                        <p class="value warning" id="statUnreturnedItems">0건</p>
+                    </div>
+                    <div class="stat-card" onclick="showRequestStatusModal('구매')" style="cursor: pointer;">
+                        <h3>구매 요청</h3>
+                        <div class="value-group">
+                            <span class="badge-stat-pending" id="statPurchasePending">대기 0건</span>
+                            <span class="badge-stat-progress" id="statPurchaseProgress">진행 0건</span>
+                        </div>
+                    </div>
+                    <div class="stat-card" onclick="showRequestStatusModal('수리')" style="cursor: pointer;">
+                        <h3>수리 요청</h3>
+                        <div class="value-group">
+                            <span class="badge-stat-pending" id="statRepairPending">대기 0건</span>
+                            <span class="badge-stat-progress" id="statRepairProgress">수리 0건</span>
+                        </div>
+                    </div>
+                    <div class="stat-card" onclick="showRequestStatusModal('버그')" style="cursor: pointer;">
+                        <h3>버그 수정 요청</h3>
+                        <div class="value-group">
+                            <span class="badge-stat-pending" id="statBugPending">대기 0건</span>
+                            <span class="badge-stat-progress" id="statBugProgress">진행 0건</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Weekly Facility Schedule Section -->
+                <div class="weekly-scheduler-section"
+                    style="background: white; border-radius: 12px; border: 1px solid #e2e8f0; padding: 1.5rem; margin-bottom: 2.5rem; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);">
+                    <div
+                        style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                        <h2 style="font-size: 1.25rem; font-weight: 700;">주간 시설 이용 시간표</h2>
+
+                        <!-- Facility Tabs -->
+                        <div class="facility-tabs" style="display: flex; gap: 0.5rem;">
+                            <button class="btn btn-outline btn-sm active"
+                                onclick="switchDashboardFacility('체육관', this)">체육관</button>
+                            <button class="btn btn-outline btn-sm" onclick="switchDashboardFacility('실내 체육실', this)">실내
+                                체육실</button>
+                            <button class="btn btn-outline btn-sm"
+                                onclick="switchDashboardFacility('운동장', this)">운동장</button>
+                        </div>
+
+                        <!-- Date Navigation -->
+                        <div style="display: flex; align-items: center; gap: 0.75rem;">
+                            <button class="btn btn-outline btn-sm" onclick="changeDashboardWeek(-7)">&lt;</button>
+                            <span id="dashboardWeekRange"
+                                style="font-weight: 600; font-size: 1rem; color: #334155; min-width: 180px; text-align: center;">-</span>
+                            <button class="btn btn-outline btn-sm" onclick="changeDashboardWeek(7)">&gt;</button>
+                        </div>
+                    </div>
+
+                    <div id="dashboardWeeklyGrid" style="overflow-x: auto;">
+                        <p style="text-align: center; padding: 2rem;">로딩 중...</p>
+                    </div>
+                </div>
+                <div class="recent-activity">
+                    <h2>최근 활동</h2>
+                    <ul id="recentActivityList">
+                        <!-- JS로 채워질 예정 -->
+                    </ul>
+                </div>
+            </section>
+
+            <section id="timetable" class="tab-content">
+                <div class="timetable-controls">
+                    <input type="date" id="timetableDate" value="2026-01-17">
+                    <button class="btn btn-outline btn-sm" id="baseScheduleBtn"
+                        style="display: none; margin-left: 10px;" onclick="showBaseScheduleEditor()">
+                        <i data-lucide="calendar-days" style="width: 14px; height: 14px; margin-right: 4px;"></i>
+                        기본 시간표 설정
+                    </button>
+                    <div class="location-filters">
+                        <button class="filter-btn active" data-loc="all">전체</button>
+                        <button class="filter-btn" data-loc="체육관">체육관</button>
+                        <button class="filter-btn" data-loc="실내 체육실">실내 체육실</button>
+                        <button class="filter-btn" data-loc="운동장">운동장</button>
+                    </div>
+                </div>
+                <div class="timetable-wrapper">
+                    <table class="timetable">
+                        <thead>
+                            <tr>
+                                <th>교시 / 시간</th>
+                                <th>체육관</th>
+                                <th>실내 체육실</th>
+                                <th>운동장</th>
+                            </tr>
+                        </thead>
+                        <tbody id="timetableBody">
+                            <!-- JS로 생성됨 -->
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <section id="inventory" class="tab-content">
+                <div class="table-header">
+                    <h2>비품 현황</h2>
+                    <div id="inventoryActions" style="display: flex; gap: 8px;">
+                        <button class="btn btn-sm" id="bulkUpdateBtn" style="background-color: #64748b; display: none;"
+                            onclick="showBulkLocationModal()">선택 항목 이동</button>
+                        <button class="btn btn-sm" id="manageLocBtn" style="background-color: #64748b; display: none;"
+                            onclick="showLocationManager()">위치 관리</button>
+                        <button class="btn btn-primary" id="addInventoryBtn">물품 추가</button>
+                    </div>
+                </div>
+
+                <!-- Filter Bar -->
+                <div style="display: flex; gap: 10px; margin-bottom: 10px; flex-wrap: wrap;">
+                    <input type="text" id="inventorySearchInput" placeholder="비품명 검색..."
+                        style="padding: 0.5rem; border: 1px solid #cbd5e1; border-radius: 6px; width: 220px;"
+                        oninput="initInventory()">
+                    <select id="inventoryLocationFilter"
+                        style="padding: 0.5rem; border: 1px solid #cbd5e1; border-radius: 6px; min-width: 150px;"
+                        onchange="initInventory()">
+                        <option value="">전체 위치</option>
+                    </select>
+                </div>
+                <div class="table-wrapper">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th style="width: 40px; display: none;" class="admin-checkbox-col"><input
+                                        type="checkbox" id="selectAllInventory" onchange="toggleAllInventory(this)">
+                                </th>
+                                <th>품명</th>
+                                <th>위치</th>
+                                <th>수량</th>
+                                <th>대여 현황</th>
+                                <th>상태</th>
+                                <th>작업</th>
+                            </tr>
+                        </thead>
+                        <tbody id="inventoryBody">
+                            <!-- JS로 생성됨 -->
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <section id="requests" class="tab-content">
+                <div class="table-header">
+                    <h2>구매 요청 목록</h2>
+                    <button class="btn btn-primary" id="addRequestBtn">구매 요청</button>
+                </div>
+                <div class="table-wrapper">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>구분</th>
+                                <th>내용</th>
+                                <th>신청자</th>
+                                <th>상태</th>
+                                <th>관리자 메모</th>
+                                <th>작업</th>
+                            </tr>
+                        </thead>
+                        <tbody id="requestBody">
+                            <!-- JS로 생성됨 -->
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <section id="repairs" class="tab-content">
+                <div class="table-header">
+                    <h2>수리 요청</h2>
+                    <button class="btn btn-primary" id="addRepairBtn">수리 요청</button>
+                </div>
+                <div class="table-wrapper">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>물품명</th>
+                                <th>요청 내용</th>
+                                <th>수량</th>
+                                <th>신청자</th>
+                                <th>상태</th>
+                                <th>관리자 메모</th>
+                                <th>작업</th>
+                            </tr>
+                        </thead>
+                        <tbody id="repairBody">
+                            <!-- JS로 생성됨 -->
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+            <section id="bugs" class="tab-content">
+                <div class="table-header">
+                    <h2>버그 수정 요청</h2>
+                    <button class="btn btn-primary" id="addBugBtn">버그 신고</button>
+                </div>
+                <div class="table-wrapper">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>구분</th>
+                                <th>내용</th>
+                                <th>신청자</th>
+                                <th>상태</th>
+                                <th>관리자 메모</th>
+                                <th>작업</th>
+                            </tr>
+                        </thead>
+                        <tbody id="bugBody">
+                            <!-- JS로 생성됨 -->
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+            <section id="adminManage" class="tab-content">
+                <div class="table-header">
+                    <h2>관리자 관리 (Master 전용)</h2>
+                    <p style="color: #64748b; font-size: 0.9rem;">관리자 승인 및 계정 관리를 수행합니다.</p>
+                </div>
+                <div id="adminManagementMain" class="table-wrapper">
+                    <!-- Admin List will be rendered here -->
+                    <div id="adminListContainer" style="padding: 1rem;">
+                        <p>데이터 로딩 중...</p>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- Modal for Reservation/Request -->
+    <div id="modal" class="modal">
+        <div class="modal-content">
+            <span class="close">&times;</span>
+            <h2 id="modalTitle">장소 예약</h2>
+            <form id="modalForm">
+                <!-- JS로 동적 생성 -->
+            </form>
+        </div>
+    </div>
+
+    <script src="js/data.js"></script>
+    <script src="js/app.js"></script>
+    <script>
+        lucide.createIcons();
+    </script>
+    <!-- Base Schedule Editor Modal -->
+    <div id="baseScheduleModal" class="modal">
+        <div class="modal-content" style="width: 95%; max-width: 1200px;">
+            <span class="close" onclick="closeBaseScheduleModal()">&times;</span>
+            <div class="modal-header">
+                <h2 id="baseModalTitle">기본 시간표 설정</h2>
+            </div>
+
+            <div class="tabs" style="margin-bottom: 1rem;">
+                <button class="tab-btn active" onclick="switchBaseLocation('체육관', this)">체육관</button>
+                <button class="tab-btn" onclick="switchBaseLocation('실내 체육실', this)">실내 체육실</button>
+                <button class="tab-btn" onclick="switchBaseLocation('운동장', this)">운동장</button>
+            </div>
+
+            <div id="baseScheduleGrid" style="overflow-x: auto;">
+                <!-- 5-day Grid will be rendered here -->
+            </div>
+
+            <div class="modal-actions" style="margin-top: 1.5rem;">
+                <button type="button" class="btn btn-primary" onclick="saveBaseSchedule()">저장하기</button>
+                <button type="button" class="btn" style="background: #e2e8f0;"
+                    onclick="closeBaseScheduleModal()">취소</button>
+            </div>
+        </div>
+    </div>
+</body>
+
+</html>
