@@ -731,16 +731,130 @@ input:checked+.slider:before {
     align-items: center;
 }
 
-/* Custom Scrollbar for the list */
-.repair-item-grid::-webkit-scrollbar {
-    width: 6px;
-}
-
-.repair-item-grid::-webkit-scrollbar-track {
-    background: transparent;
-}
-
 .repair-item-grid::-webkit-scrollbar-thumb {
     background-color: #cbd5e1;
     border-radius: 20px;
+}
+
+/* --- Bulk Rental (Sports Day Mode) Styles --- */
+.bulk-modal-content {
+    width: 600px;
+    height: 85vh;
+    /* Fixed height for modal */
+    max-height: 800px;
+    display: flex;
+    flex-direction: column;
+    padding: 1.5rem;
+    overflow: hidden;
+    /* Prevent outer scroll */
+}
+
+.bulk-section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+/* List Wrappers for Independent Scrolling */
+.bulk-list-wrapper {
+    flex: 2;
+    /* Takes up more space */
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    overflow-y: auto;
+    background: #f8fafc;
+    min-height: 0;
+    /* Flexbox scroll fix */
+}
+
+.bulk-cart-wrapper {
+    flex: 1;
+    /* Takes up less space */
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    overflow-y: auto;
+    background: white;
+    min-height: 0;
+    /* Flexbox scroll fix */
+    margin-bottom: 1rem;
+}
+
+.bulk-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.9rem;
+}
+
+.bulk-table th {
+    text-align: left;
+    color: #64748b;
+    font-weight: 600;
+    border-bottom: 1px solid #e2e8f0;
+}
+
+.bulk-table td {
+    padding: 8px;
+    border-bottom: 1px solid #f1f5f9;
+    vertical-align: middle;
+}
+
+.bulk-qty-control {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+}
+
+.qty-btn {
+    width: 24px;
+    height: 24px;
+    border: 1px solid #cbd5e1;
+    background: white;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    font-size: 1rem;
+    color: #475569;
+    padding: 0;
+}
+
+.qty-btn:hover {
+    background: #f1f5f9;
+    border-color: #94a3b8;
+}
+
+.qty-display {
+    width: 36px;
+    text-align: center;
+    font-weight: 600;
+    border: none;
+    background: transparent;
+}
+
+.bulk-add-btn {
+    padding: 4px 10px;
+    font-size: 0.8rem;
+    background: #eff6ff;
+    color: var(--primary);
+    border: 1px solid #bfdbfe;
+    border-radius: 4px;
+    cursor: pointer;
+    font-weight: 600;
+}
+
+.bulk-add-btn:hover {
+    background: var(--primary);
+    color: white;
+}
+
+.bulk-footer {
+    display: flex;
+    gap: 1rem;
+    align-items: flex-end;
+    padding-top: 1rem;
+    border-top: 1px solid #e2e8f0;
+    background: white;
 }

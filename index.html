@@ -336,6 +336,68 @@
             </div>
         </div>
     </div>
+    <!-- Bulk Rental Modal -->
+    <div id="bulkRentalModal" class="modal">
+        <div class="modal-content bulk-modal-content">
+            <span class="close" onclick="closeBulkRentalModal()">&times;</span>
+            <h2 style="margin-bottom: 0.5rem;">일괄 대여 (주문서 모드)</h2>
+            <p style="color: #64748b; font-size: 0.9rem; margin-bottom: 1rem;">필요한 물품을 체크해서 장바구니에 담은 후 한 번에 대여하세요.</p>
+
+            <!-- 1. Item List Section -->
+            <div class="bulk-section-header">
+                <span style="font-weight: 700;">📦 비품 목록</span>
+                <input type="text" id="bulkItemSearch" placeholder="비품명 검색..." oninput="filterBulkItems()"
+                    style="padding: 6px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 0.9rem; width: 180px;">
+            </div>
+            <div class="bulk-list-wrapper">
+                <table class="bulk-table">
+                    <thead style="position: sticky; top: 0; background: #f8fafc; z-index: 10;">
+                        <tr>
+                            <th style="padding: 8px;">품명</th>
+                            <th style="width: 70px; text-align: center;">잔여</th>
+                            <th style="width: 140px; text-align: center;">대여 수량</th>
+                            <th style="width: 70px; text-align: center;">담기</th>
+                        </tr>
+                    </thead>
+                    <tbody id="bulkItemBody">
+                        <!-- Items rendered via JS -->
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- 2. Cart Section -->
+            <div class="bulk-section-header"
+                style="margin-top: 1rem; border-top: 2px dashed #e2e8f0; padding-top: 1rem;">
+                <span style="font-weight: 700;">🛒 장바구니 (담은 목록)</span>
+                <span id="bulkCartCount"
+                    style="background: var(--primary); color: white; padding: 2px 8px; border-radius: 12px; font-size: 0.8rem;">0개</span>
+            </div>
+            <div class="bulk-cart-wrapper">
+                <table class="bulk-table">
+                    <tbody id="bulkCartBody">
+                        <!-- Cart Items rendered via JS -->
+                    </tbody>
+                </table>
+                <div id="bulkCartEmpty" style="text-align: center; color: #94a3b8; padding: 2rem;">
+                    장바구니가 비어있습니다.
+                </div>
+            </div>
+
+            <!-- 3. Footer -->
+            <div class="bulk-footer">
+                <div style="flex: 1;">
+                    <label style="display: block; font-size: 0.85rem; color: #64748b; margin-bottom: 4px;">신청자
+                        (필수)</label>
+                    <input type="text" id="bulkRequester" placeholder="예: 6-1 홍길동" class="base-input"
+                        style="width: 100%;">
+                </div>
+                <button class="btn btn-primary" onclick="submitBulkRental()"
+                    style="height: 42px; padding: 0 2rem; font-weight: bold;">
+                    일괄 대여 완료
+                </button>
+            </div>
+        </div>
+    </div>
 </body>
 
 </html>
