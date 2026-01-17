@@ -633,10 +633,10 @@ window.showReturnListModal = (id) => {
 };
 
 window.processReturn = (itemId, rentalId) => {
-    const item = dataManager.inventory.find(i => i.id === itemId);
+    const item = dataManager.inventory.find(i => i.id == itemId);
     if (!item) return;
 
-    const rental = item.rentals.find(r => r.id === rentalId);
+    const rental = item.rentals.find(r => r.id == rentalId);
     if (!rental) return;
 
     // Show confirmation view instead of native confirm
@@ -656,8 +656,8 @@ window.processReturn = (itemId, rentalId) => {
 };
 
 window.confirmReturnAction = async (itemId, rentalId) => {
-    const item = dataManager.inventory.find(i => i.id === itemId);
-    const rental = item.rentals.find(r => r.id === rentalId);
+    const item = dataManager.inventory.find(i => i.id == itemId);
+    const rental = item.rentals.find(r => r.id == rentalId);
 
     if (rental) {
         await dataManager.sync('returnItem', { rentalId });
@@ -2228,4 +2228,633 @@ window.showRequestStatusModal = (type) => {
         </div>
     `;
     form.onsubmit = (e) => e.preventDefault();
+};
+
+/* --- Bulk Rental (Sports Day Mode) Logic --- */
+let bulkCart = []; // { id, name, location, count, max }
+let currentBulkRequester = ''; // Store the requester name
+
+// New Button Handler (Replaces Toggle)
+window.openBulkRentalModal = () => {
+    // Prompt first
+    const name = prompt("신청자(학년-반 또는 동아리명)를 먼저 입력해주세요:", "");
+    if (name && name.trim()) {
+        currentBulkRequester = name.trim();
+        showBulkRentalModal();
+    }
+};
+
+/* Deprecated Toggle Logic (Kept for safety but unused) */
+window.toggleBulkRentalMode = () => {
+    // ...
+};
+
+window.closeBulkRentalModal = () => {
+    document.getElementById('bulkRentalModal').style.display = 'none';
+    const toggle = document.getElementById('bulkRentalToggle');
+    if (toggle) toggle.checked = false; // Uncheck when closed
+
+    // Reset Cart
+    bulkCart = [];
+    currentBulkRequester = '';
+};
+
+window.showBulkRentalModal = () => {
+    const modal = document.getElementById('bulkRentalModal');
+    modal.style.display = 'block';
+
+    // Update Requester Display
+    const requesterDisplay = document.getElementById('bulkRequesterDisplay');
+    if (requesterDisplay) {
+        requesterDisplay.innerText = `신청자: ${currentBulkRequester}`;
+    }
+
+    bulkCart = []; // Reset cart on open
+    renderBulkCart();
+    renderBulkItems(); // Initial Render
+};
+
+// Render Item List (Upper Pane)
+window.renderBulkItems = () => {
+    const keyword = document.getElementById('bulkItemSearch').value.toLowerCase();
+    const tbody = document.getElementById('bulkItemBody');
+    tbody.innerHTML = '';
+
+    // Filter Items
+    const items = dataManager.inventory.filter(item => {
+        if (!item.name.toLowerCase().includes(keyword)) return false;
+
+        // Calculate *Real* Available (Total - Rentals - Repairs - CART)
+        const cartItem = bulkCart.find(c => c.id === item.id);
+        const cartCount = cartItem ? cartItem.count : 0;
+        const available = getAvailableCount(item) - cartCount; // Dynamic availability
+
+        return available > 0; // Only show items that can be rented
+    });
+
+    if (items.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; padding: 2rem; color:#94a3b8;">대여 가능한 비품이 없습니다.</td></tr>';
+        return;
+    }
+
+    items.forEach(item => {
+        // Recalculate available for passing to row (redundant but safe)
+        const cartItem = bulkCart.find(c => c.id === item.id);
+        const cartCount = cartItem ? cartItem.count : 0;
+        const available = getAvailableCount(item) - cartCount;
+
+        const row = document.createElement('tr');
+        row.innerHTML = `
+            <td>
+                <div style="font-weight:600;">${item.name}</div>
+                <div style="font-size:0.8rem; color:#64748b;">${item.location}</div>
+            </td>
+            <td style="text-align:center; color: var(--primary); font-weight:600;">${available}</td>
+            <td style="text-align:center;">
+                <div class="bulk-qty-control">
+                    <button class="qty-btn" onclick="updateBulkEntryQty(${item.id}, -1)">-</button>
+                    <input type="number" id="bulk-qty-${item.id}" value="1" min="1" max="${available}" class="qty-display" readonly>
+                    <button class="qty-btn" onclick="updateBulkEntryQty(${item.id}, 1, ${available})">+</button>
+                </div>
+            </td>
+            <td style="text-align:center;">
+                <button class="bulk-add-btn" onclick="addToBulkCart(${item.id}, ${available})">담기</button>
+            </td>
+        `;
+        tbody.appendChild(row);
+    });
+};
+
+window.filterBulkItems = () => {
+    renderBulkItems();
+};
+
+window.updateBulkEntryQty = (id, delta, max) => {
+    const input = document.getElementById(`bulk-qty-${id}`);
+    let val = parseInt(input.value) || 1;
+    val += delta;
+    if (val < 1) val = 1;
+    if (max && val > max) val = max;
+    input.value = val;
+};
+
+// Cart Logic
+window.addToBulkCart = (itemId, maxAvailable) => {
+    const qtyInput = document.getElementById(`bulk-qty-${itemId}`);
+    const qtyToAdd = parseInt(qtyInput.value) || 1;
+
+    if (qtyToAdd > maxAvailable) {
+        alert('잔여 수량을 초과할 수 없습니다.');
+        return;
+    }
+
+    const item = dataManager.inventory.find(i => i.id === itemId);
+    const existing = bulkCart.find(c => c.id === itemId);
+
+    if (existing) {
+        existing.count += qtyToAdd;
+    } else {
+        bulkCart.push({
+            id: item.id,
+            name: item.name,
+            location: item.location,
+            count: qtyToAdd,
+            max: getAvailableCount(item) // Original max
+        });
+    }
+
+    // Refresh UI
+    renderBulkItems(); // Updates available counts in list
+    renderBulkCart();
+};
+
+window.removeFromBulkCart = (itemId) => {
+    bulkCart = bulkCart.filter(c => c.id !== itemId);
+    renderBulkItems();
+    renderBulkCart();
+};
+
+// Update Cart Qty (Local)
+window.updateBulkCartQty = (itemId, delta) => {
+    const cartItem = bulkCart.find(c => c.id === itemId);
+    if (!cartItem) return;
+
+    // Recalculate Max Available: (Current Available in Inventory + Current in Cart)
+    const item = dataManager.inventory.find(i => i.id === itemId);
+    const availableInInv = getAvailableCount(item);
+    const maxTotal = availableInInv + cartItem.count;
+
+    let newCount = cartItem.count + delta;
+    if (newCount < 1) newCount = 1;
+    if (newCount > maxTotal) newCount = maxTotal;
+
+    cartItem.count = newCount;
+
+    // Refresh UI
+    renderBulkItems();
+    renderBulkCart();
+};
+
+window.renderBulkCart = () => {
+    const tbody = document.getElementById('bulkCartBody');
+    const emptyMsg = document.getElementById('bulkCartEmpty');
+    const countBadge = document.getElementById('bulkCartCount');
+
+    tbody.innerHTML = '';
+    countBadge.innerText = `${bulkCart.length}종`;
+
+    if (bulkCart.length === 0) {
+        emptyMsg.style.display = 'block';
+    } else {
+        emptyMsg.style.display = 'none';
+        bulkCart.forEach(c => {
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td>
+                    <div style="font-weight:600;">${c.name}</div>
+                    <div style="font-size:0.8rem; color:#64748b;">${c.location}</div>
+                </td>
+                <td style="text-align:center;">-</td>
+                <td style="text-align:center;">
+                    <div class="bulk-qty-control">
+                        <button class="qty-btn" onclick="updateBulkCartQty(${c.id}, -1)">-</button>
+                        <span style="width:30px; text-align:center; font-weight:bold;">${c.count}</span>
+                        <button class="qty-btn" onclick="updateBulkCartQty(${c.id}, 1)">+</button>
+                    </div>
+                </td>
+                <td style="text-align:center;">
+                    <button class="qty-btn" style="color:#ef4444; border-color:#ef4444;" onclick="removeFromBulkCart(${c.id})">
+                        <i data-lucide="trash-2" style="width:14px;"></i>
+                    </button>
+                </td>
+            `;
+            tbody.appendChild(row);
+        });
+        lucide.createIcons();
+    }
+};
+
+// Final Submission
+window.submitBulkRental = async () => {
+    // Use the stored global variable
+    const requester = currentBulkRequester;
+
+    if (bulkCart.length === 0) {
+        alert('장바구니에 담긴 물품이 없습니다.');
+        return;
+    }
+    if (!requester) {
+        alert('신청자 정보가 없습니다. 다시 실행해주세요.');
+        closeBulkRentalModal();
+        return;
+    }
+
+    if (!confirm(`신청자: [${requester}]\n총 ${bulkCart.length}종류의 비품을 일괄 대여하시겠습니까?`)) return;
+
+    // Show Loading State
+    const btn = document.querySelector('.bulk-footer .btn-primary');
+    const originalText = btn.innerText;
+    btn.disabled = true;
+    btn.innerText = '처리 중...';
+
+    let successCount = 0;
+    let failCount = 0;
+
+    try {
+        // Sequential Sync with error isolation
+        for (const cartItem of bulkCart) {
+            // Generate unique ID for each rental
+            const rentalId = Date.now() + Math.floor(Math.random() * 10000);
+
+            const rentalData = {
+                id: rentalId,
+                item_id: cartItem.id,
+                class: requester,
+                count: cartItem.count,
+                date: new Date().toISOString(),
+                reason: '일괄 대여(운동회 모드)',
+                returned: false
+            };
+
+            // Client-side Update handled by sync
+            // dataManager.applyLocalUpdate('addRental', { data: rentalData });
+
+            try {
+                // Server Sync (Fire and wait slightly to not flood)
+                await dataManager.sync('addRental', { data: rentalData });
+                successCount++;
+            } catch (innerErr) {
+                console.error(`Failed to sync item ${cartItem.name}`, innerErr);
+                failCount++;
+            }
+
+            // Small delay to prevent rate limiting/network flooding
+            await new Promise(r => setTimeout(r, 300));
+        }
+
+        // Add Summary Activity Log
+        if (successCount > 0) {
+            const firstItemName = bulkCart[0].name;
+            const extraCount = successCount - 1;
+            const logMsg = extraCount > 0
+                ? `${requester}에서 ${firstItemName} 외 ${extraCount}건을 일괄 대여하였습니다.`
+                : `${requester}에서 ${firstItemName}을(를) 일괄 대여하였습니다.`;
+
+            // Await to ensure local state is updated before rendering
+            await dataManager.sync('logActivity', { message: logMsg });
+        }
+
+        closeBulkRentalModal();
+
+        // Robust UI Refresh
+        try {
+            renderRecentActivity(); // Refresh logs first
+            initInventory(); // Refresh main table
+            renderDashboardStats(); // Refresh stats
+        } catch (uiErr) {
+            console.warn('UI Refresh failed after rental', uiErr);
+        }
+
+        if (failCount > 0) {
+            alert(`일괄 대여가 완료되었으나, ${failCount}건의 서버 동기화가 지연될 수 있습니다.\n(데이터는 저장되었습니다)`);
+        } else {
+            alert('일괄 대여가 정상적으로 완료되었습니다.');
+        }
+
+    } catch (e) {
+        console.error(e);
+        alert('처리 중 치명적인 오류가 발생했습니다.');
+    } finally {
+        btn.disabled = false;
+        btn.innerText = originalText;
+    }
+};
+
+/* --- Bulk Return Logic --- */
+let bulkReturnCart = []; // { itemId, name, location, count, className }
+
+window.showBulkReturnModal = () => {
+    const modal = document.getElementById('bulkReturnModal');
+    const select = document.getElementById('bulkReturnClassSelect');
+
+    // Populate Class Select (Only classes with active rentals)
+    const activeClasses = new Set();
+    const dateRegex = /^\d{4}-\d{2}-\d{2}T/; // ISO Date check
+
+    dataManager.inventory.forEach(item => {
+        if (item.rentals) {
+            item.rentals.forEach(r => {
+                if (!r.returned) {
+                    // Check 'class' first, then legacy 'requester'
+                    let name = r.class || r.requester;
+
+                    // Filter out bad data (dates, empty strings)
+                    if (name && typeof name === 'string' && name.length < 20 && !dateRegex.test(name)) {
+                        activeClasses.add(name);
+                    }
+                }
+            });
+        }
+    });
+
+    select.innerHTML = '<option value="">반납할 학급 선택 (대여 중인 반만 표시됨)</option>';
+    if (activeClasses.size === 0) {
+        const opt = document.createElement('option');
+        opt.text = "(현재 대여 중인 학급이 없습니다)";
+        opt.disabled = true;
+        select.appendChild(opt);
+    } else {
+        Array.from(activeClasses).sort().forEach(cls => {
+            const opt = document.createElement('option');
+            opt.value = cls;
+            opt.text = cls;
+            select.appendChild(opt);
+        });
+    }
+
+    modal.style.display = 'block';
+    bulkReturnCart = [];
+    document.getElementById('bulkReturnItemBody').innerHTML = '';
+    document.getElementById('bulkReturnTargetDisplay').innerText = '반납자: 학급을 선택해주세요';
+    renderBulkReturnCart();
+};
+
+window.closeBulkReturnModal = () => {
+    document.getElementById('bulkReturnModal').style.display = 'none';
+    bulkReturnCart = [];
+};
+
+window.onBulkReturnClassChange = () => {
+    const select = document.getElementById('bulkReturnClassSelect');
+    const className = select.value;
+    const display = document.getElementById('bulkReturnTargetDisplay');
+
+    if (className) {
+        display.innerText = `반납자: ${className}`;
+        renderBulkReturnItems(className);
+    } else {
+        display.innerText = '반납자: 학급을 선택해주세요';
+        document.getElementById('bulkReturnItemBody').innerHTML = '';
+    }
+
+    // Reset cart when class changes (safety)
+    bulkReturnCart = [];
+    renderBulkReturnCart();
+};
+
+window.renderBulkReturnItems = (className) => {
+    const tbody = document.getElementById('bulkReturnItemBody');
+    tbody.innerHTML = '';
+
+    // Find items rented by this class
+    const rentedItems = [];
+    dataManager.inventory.forEach(item => {
+        if (!item.rentals) return;
+
+        // Aggregate active rental count for this class
+        const totalRented = item.rentals
+            .filter(r => (r.class === className || r.requester === className) && !r.returned)
+            .reduce((sum, r) => sum + (r.count || 0), 0);
+
+        if (totalRented > 0) {
+            rentedItems.push({
+                ...item,
+                rentedCount: totalRented
+            });
+        }
+    });
+
+    if (rentedItems.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; padding: 2rem; color:#94a3b8;">대여 중인 물품이 없습니다.</td></tr>';
+        return;
+    }
+
+    rentedItems.forEach(item => {
+        // Calculate remaining rent count (Total Rented - Already in Return Cart)
+        const cartItem = bulkReturnCart.find(c => c.itemId === item.id);
+        const inCart = cartItem ? cartItem.count : 0;
+        const availableReturn = item.rentedCount - inCart;
+
+        // Skip if 0 available to return (optional: show disabled)
+        // if (availableReturn <= 0) return;
+
+        const row = document.createElement('tr');
+        row.innerHTML = `
+            <td>
+                <div style="font-weight:600;">${item.name}</div>
+                <div style="font-size:0.8rem; color:#64748b;">대여중: ${item.rentedCount}개</div>
+            </td>
+            <td style="text-align:center; color: var(--danger); font-weight:600;">${item.rentedCount}</td>
+            <td style="text-align:center;">
+                <div class="bulk-qty-control">
+                    <button class="qty-btn" onclick="updateBulkReturnQty(${item.id}, -1)">-</button>
+                    <input type="number" id="bulk-return-qty-${item.id}" value="${availableReturn}" min="1" max="${availableReturn}" class="qty-display" readonly>
+                    <button class="qty-btn" onclick="updateBulkReturnQty(${item.id}, 1, ${availableReturn})">+</button>
+                </div>
+            </td>
+            <td style="text-align:center;">
+                <button class="bulk-add-btn" onclick="addToBulkReturnCart(${item.id}, ${availableReturn}, '${className}')">담기</button>
+            </td>
+        `;
+        tbody.appendChild(row);
+    });
+};
+
+window.updateBulkReturnQty = (id, delta, max) => {
+    const input = document.getElementById(`bulk-return-qty-${id}`);
+    if (!input) return;
+    let val = parseInt(input.value) || 1;
+    val += delta;
+    if (val < 1) val = 1;
+    if (max && val > max) val = max;
+    input.value = val;
+};
+
+window.addToBulkReturnCart = (itemId, maxReturnable, className) => {
+    const qtyInput = document.getElementById(`bulk-return-qty-${itemId}`);
+    const qtyToAdd = parseInt(qtyInput.value) || 1;
+
+    if (qtyToAdd > maxReturnable) {
+        alert('반납 가능 수량을 초과할 수 없습니다.');
+        return;
+    }
+
+    const item = dataManager.inventory.find(i => i.id === itemId);
+    const existing = bulkReturnCart.find(c => c.itemId === itemId);
+
+    if (existing) {
+        existing.count += qtyToAdd;
+    } else {
+        bulkReturnCart.push({
+            itemId: item.id,
+            name: item.name,
+            location: item.location,
+            count: qtyToAdd,
+            max: maxReturnable, // Store max for cart editing
+            className: className
+        });
+    }
+
+    renderBulkReturnItems(className);
+    renderBulkReturnCart();
+};
+
+window.removeFromBulkReturnCart = (itemId) => {
+    bulkReturnCart = bulkReturnCart.filter(c => c.itemId !== itemId);
+    const className = document.getElementById('bulkReturnClassSelect').value;
+    renderBulkReturnItems(className);
+    renderBulkReturnCart();
+};
+
+// Update Logic for CART (Return)
+window.updateBulkReturnCartQty = (itemId, delta) => {
+    const cartItem = bulkReturnCart.find(c => c.itemId === itemId);
+    if (!cartItem) return;
+
+    // We need to know the 'true max' which is (Remaining in list + Current in cart)
+    // But simplistically: The item knows its 'rentedCount'.
+    // Max for this cart item = Total Rented by class
+
+    // Find original item to get total rented
+    const item = dataManager.inventory.find(i => i.id === itemId);
+    const totalRented = item ? item.rentals
+        .filter(r => (r.class === cartItem.className || r.requester === cartItem.className) && !r.returned)
+        .reduce((sum, r) => sum + (r.count || 0), 0) : cartItem.count;
+
+    let newCount = cartItem.count + delta;
+    if (newCount < 1) newCount = 1;
+    if (newCount > totalRented) newCount = totalRented;
+
+    cartItem.count = newCount;
+
+    const className = document.getElementById('bulkReturnClassSelect').value;
+    renderBulkReturnItems(className); // Update available counts in list
+    renderBulkReturnCart();
+};
+
+window.renderBulkReturnCart = () => {
+    const tbody = document.getElementById('bulkReturnCartBody');
+    const emptyMsg = document.getElementById('bulkReturnCartEmpty');
+    const countBadge = document.getElementById('bulkReturnCartCount');
+
+    tbody.innerHTML = '';
+    countBadge.innerText = `${bulkReturnCart.length}종`;
+
+    if (bulkReturnCart.length === 0) {
+        emptyMsg.style.display = 'block';
+    } else {
+        emptyMsg.style.display = 'none';
+        bulkReturnCart.forEach(c => {
+            // Find total rented again for max calculation in UI
+            const item = dataManager.inventory.find(i => i.id === c.itemId);
+            const totalRented = item ? item.rentals
+                .filter(r => (r.class === c.className || r.requester === c.className) && !r.returned)
+                .reduce((sum, r) => sum + (r.count || 0), 0) : c.count;
+
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td>
+                    <div style="font-weight:600;">${c.name}</div>
+                    <div style="font-size:0.8rem; color:#64748b;">${c.location}</div>
+                </td>
+                <td style="text-align:center;">-</td>
+                <td style="text-align:center;">
+                    <div class="bulk-qty-control">
+                        <button class="qty-btn" onclick="updateBulkReturnCartQty(${c.itemId}, -1)">-</button>
+                        <span style="width:30px; text-align:center; font-weight:bold;">${c.count}</span>
+                        <button class="qty-btn" onclick="updateBulkReturnCartQty(${c.itemId}, 1)">+</button>
+                    </div>
+                </td>
+                <td style="text-align:center;">
+                    <button class="qty-btn" style="color:#ef4444; border-color:#ef4444;" onclick="removeFromBulkReturnCart(${c.itemId})">
+                        <i data-lucide="trash-2" style="width:14px;"></i>
+                    </button>
+                </td>
+            `;
+            tbody.appendChild(row);
+        });
+        lucide.createIcons();
+    }
+};
+
+window.submitBulkReturn = async () => {
+    const className = document.getElementById('bulkReturnClassSelect').value;
+
+    if (bulkReturnCart.length === 0) {
+        alert('반납할 물품이 없습니다.');
+        return;
+    }
+    if (!className) {
+        alert('학급이 선택되지 않았습니다.');
+        return;
+    }
+
+    if (!confirm(`[${className}]의 물품 ${bulkReturnCart.length}종을 일괄 반납하시겠습니까?`)) return;
+
+    const btn = document.querySelector('#bulkReturnModal .btn-primary');
+    const originalText = btn.innerText;
+    btn.disabled = true;
+    btn.innerText = '처리 중...';
+
+    let successCount = 0;
+    let failCount = 0;
+
+    try {
+        for (const cartItem of bulkReturnCart) {
+            const payload = {
+                itemId: cartItem.itemId,
+                class: className,
+                count: cartItem.count
+            };
+
+            // Client-side Update is handled by dataManager.sync internally now
+            /* dataManager.applyLocalUpdate('partialReturn', payload); */
+
+            try {
+                // Server Sync
+                await dataManager.sync('partialReturn', payload);
+                successCount++;
+            } catch (innerErr) {
+                console.error(innerErr);
+                failCount++;
+            }
+
+            await new Promise(r => setTimeout(r, 300));
+        }
+
+        // Add Summary Log
+        if (successCount > 0) {
+            const firstItemName = bulkReturnCart[0].name;
+            const extraCount = successCount - 1;
+            const logMsg = extraCount > 0
+                ? `${className}에서 ${firstItemName} 외 ${extraCount}건을 일괄 반납하였습니다.`
+                : `${className}에서 ${firstItemName}을(를) 일괄 반납하였습니다.`;
+
+            await dataManager.sync('logActivity', { message: logMsg });
+        }
+
+        closeBulkRentalModal();
+
+        // Robust UI Refresh
+        try {
+            renderRecentActivity();
+            initInventory();
+            renderDashboardStats();
+        } catch (uiErr) {
+            console.warn('UI Refresh failed after return', uiErr);
+        }
+
+        if (failCount > 0) {
+            alert(`일괄 반납이 완료되었으나, ${failCount}건의 동기화가 지연될 수 있습니다.`);
+        } else {
+            alert('일괄 반납이 완료되었습니다.');
+        }
+
+    } catch (e) {
+        console.error(e);
+        alert('오류가 발생했습니다.');
+    } finally {
+        btn.disabled = false;
+        btn.innerText = originalText;
+    }
 };

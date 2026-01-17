@@ -51,15 +51,85 @@ class DataManager {
             this.baseSchedule = data.baseSchedule || [];
             this.weeklySchedule = data.weeklySchedule || [];
 
-            // Robust Inventory Parsing
-            this.inventory = (data.inventory || []).map(item => ({
-                ...item,
-                rentals: Array.isArray(item.rentals) ? item.rentals : [],
-                repairs: Array.isArray(item.repairs) ? item.repairs : []
-            }));
+            // Robust Inventory Parsing & Self-Healing
+            const dateRegex = /^\d{4}-\d{2}-\d{2}T/;
+            this.inventory = (data.inventory || []).map(item => {
+                const rentals = Array.isArray(item.rentals) ? item.rentals.map(r => {
+                    // Self-Healing: Check if Class is corrupted as Date
+                    // If 'class' looks like a date (YYYY-MM-DD...)
+                    if (r.class && typeof r.class === 'string' && dateRegex.test(r.class)) {
+                        // Case 1: Swap if date is NOT a date (rare)
+                        if (r.date && !dateRegex.test(r.date)) {
+                            const temp = r.class;
+                            r.class = r.date;
+                            r.date = temp;
+                        }
+                        // Case 2: Both are dates? Likely Sheet Auto-format (e.g. 4-3 -> 2026-04-03)
+                        // Verify if r.class matches "YYYY-MM-DD" pattern
+                        else if (r.date && dateRegex.test(r.date)) {
+                            try {
+                                const d = new Date(r.class);
+                                if (!isNaN(d.getTime())) {
+                                    // Extract Month and Day. 
+                                    // Note: getMonth() is 0-indexed.
+                                    // '2026-04-03' -> Month 3(April), Date 3 -> "4-3"
+                                    const month = d.getMonth() + 1;
+                                    const day = d.getDate();
+
+                                    // Heuristic: If it converts to a plausible class string (e.g. 3-1 to 6-15)
+                                    // We assume it's a corrupted class name.
+                                    r.class = `${month}-${day}`;
+                                }
+                            } catch (e) {
+                                // Ignore parse error, keep as is
+                            }
+                        }
+                    }
+                    return r;
+                }) : [];
+
+                const repairs = Array.isArray(item.repairs) ? item.repairs.map(r => {
+                    // Healing for Repair Requests (requester field)
+                    const dateRegex = /^\d{4}-\d{2}-\d{2}T/;
+                    if (r.requester && typeof r.requester === 'string' && dateRegex.test(r.requester)) {
+                        try {
+                            const d = new Date(r.requester);
+                            if (!isNaN(d.getTime())) {
+                                const month = d.getMonth() + 1;
+                                const day = d.getDate();
+                                r.requester = `${month}-${day}`;
+                            }
+                        } catch (e) { }
+                    }
+                    return r;
+                }) : [];
+
+                return {
+                    ...item,
+                    rentals: rentals,
+                    repairs: repairs
+                };
+            });
+
 
             this.admins = data.admins || [];
-            this.adminRequests = data.adminRequests || [];
+
+            // Healing for Purchase Requests
+            this.adminRequests = (data.adminRequests || []).map(r => {
+                const dateRegex = /^\d{4}-\d{2}-\d{2}T/;
+                if (r.requester && typeof r.requester === 'string' && dateRegex.test(r.requester)) {
+                    try {
+                        const d = new Date(r.requester);
+                        if (!isNaN(d.getTime())) {
+                            const month = d.getMonth() + 1;
+                            const day = d.getDate();
+                            r.requester = `${month}-${day}`;
+                        }
+                    } catch (e) { }
+                }
+                return r;
+            });
+
             this.locations = data.locations || defaultLocations;
             this.activityLogs = data.activityLogs || [];
 
@@ -167,6 +237,39 @@ class DataManager {
                 const rental = item.rentals.find(r => r.id == payload.rentalId);
                 if (rental) rental.returned = true;
             });
+        } else if (action === 'partialReturn') {
+            const item = this.inventory.find(i => i.id == payload.itemId);
+            if (item && item.rentals) {
+                // Find active rentals for this class
+                const activeRentals = item.rentals.filter(r => r.class === payload.class && !r.returned);
+                let remainingToReturn = parseInt(payload.count);
+
+                for (const rental of activeRentals) {
+                    if (remainingToReturn <= 0) break;
+
+                    if (rental.count <= remainingToReturn) {
+                        // Full return of this specific record
+                        rental.returned = true;
+                        remainingToReturn -= rental.count;
+                    } else {
+                        // Partial return of this record: Split it
+                        const returnCount = remainingToReturn;
+
+                        // 1. Decrease active count
+                        rental.count -= returnCount;
+
+                        // 2. Create new 'returned' record for history
+                        item.rentals.push({
+                            ...rental,
+                            id: Date.now() + Math.floor(Math.random() * 1000), // Unique ID
+                            count: returnCount,
+                            returned: true
+                        });
+
+                        remainingToReturn = 0;
+                    }
+                }
+            }
         } else if (action === 'addLocation') {
             if (!this.locations.includes(payload.location)) {
                 this.locations.push(payload.location);
