@@ -113,7 +113,8 @@ async function fetchWeatherData() {
 // ==========================================
 // AI Activity Recommender ('오늘 뭐 하지?')
 // ==========================================
-const GEMINI_API_KEY = 'AIzaSyDDvFz3-JNeGgMMLDR8FpyLTiM9Oc2rSgM';
+// API Key is now loaded from js/config.js
+// const GEMINI_API_KEY = '...'; 
 
 function initAIRecommend() {
     const itemsList = document.getElementById('aiItemsList');
