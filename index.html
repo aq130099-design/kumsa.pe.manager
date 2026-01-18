@@ -28,6 +28,9 @@
                 <button class="nav-item" data-tab="inventory">
                     <i data-lucide="package"></i> 비품/대여 관리
                 </button>
+                <button class="nav-item" data-tab="aiRecommend">
+                    <i data-lucide="sparkles"></i> AI 활동 추천
+                </button>
                 <button class="nav-item" data-tab="requests">
                     <i data-lucide="shopping-bag"></i> 구매 요청
                 </button>
@@ -58,6 +61,16 @@
                 <h1 id="pageTitle">대시보드</h1>
                 <div class="user-info">
                     <span class="date" id="currentDateDisplay">2026. 01. 17 (토)</span>
+                    <div id="weatherWidget" class="weather-widget">
+                        <div class="weather-info">
+                            <span id="weatherIcon" class="weather-icon"></span>
+                            <span id="weatherTemp" class="weather-temp">--°C</span>
+                        </div>
+                        <div class="dust-info">
+                            <span class="dust-label">미세먼지</span>
+                            <span id="dustStatus" class="dust-badge">--</span>
+                        </div>
+                    </div>
                 </div>
             </header>
 
@@ -302,6 +315,99 @@
                     </div>
                 </div>
             </section>
+            <section id="aiRecommend" class="tab-content">
+                <div class="card" style="max-width: 800px; margin: 0 auto; padding: 2rem;">
+                    <div style="text-align: center; margin-bottom: 2rem;">
+                        <div
+                            style="background: linear-gradient(135deg, #6366f1, #a855f7); width: 60px; height: 60px; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 1rem;">
+                            <i data-lucide="sparkles" style="color: white; width: 32px; height: 32px;"></i>
+                        </div>
+                        <h2>오늘 뭐 하지? (AI 수업 추천)</h2>
+                        <p style="color: #64748b;">수업 상황을 알려주시면 AI가 최적의 체육 활동을 제안해 드립니다.</p>
+                    </div>
+
+                    <form id="aiRecommendForm">
+                        <div class="form-group">
+                            <label>수업 장소 <span style="color:red">*</span></label>
+                            <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem;">
+                                <label class="location-radio">
+                                    <input type="radio" name="aiLocation" value="교실">
+                                    <span>교실</span>
+                                </label>
+                                <label class="location-radio">
+                                    <input type="radio" name="aiLocation" value="운동장">
+                                    <span>운동장</span>
+                                </label>
+                                <label class="location-radio">
+                                    <input type="radio" name="aiLocation" value="체육관">
+                                    <span>체육관</span>
+                                </label>
+                                <label class="location-radio">
+                                    <input type="radio" name="aiLocation" value="실내체육실">
+                                    <span>실내체육실</span>
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label>대상 학년 <span style="color:red">*</span></label>
+                            <div id="aiGrades" class="grade-selector"
+                                style="display: grid; grid-template-columns: repeat(6, 1fr); gap: 0.5rem;">
+                                <label class="grade-chip"><input type="checkbox" value="1학년"> 1학년</label>
+                                <label class="grade-chip"><input type="checkbox" value="2학년"> 2학년</label>
+                                <label class="grade-chip"><input type="checkbox" value="3학년"> 3학년</label>
+                                <label class="grade-chip"><input type="checkbox" value="4학년"> 4학년</label>
+                                <label class="grade-chip"><input type="checkbox" value="5학년"> 5학년</label>
+                                <label class="grade-chip"><input type="checkbox" value="6학년"> 6학년</label>
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label>사용 가능한 교구 (선택)</label>
+                            <div style="position: relative; margin-bottom: 0.5rem;">
+                                <i data-lucide="search"
+                                    style="position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: #94a3b8; width: 16px; height: 16px;"></i>
+                                <input type="text" id="aiItemSearch" placeholder="교구 검색..." oninput="filterAIItems()"
+                                    style="width: 100%; padding: 8px 8px 8px 36px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 0.9rem;">
+                            </div>
+                            <div id="aiItemsList" class="ai-items-grid"
+                                style="max-height: 200px; overflow-y: auto; border: 1px solid #e2e8f0; border-radius: 8px; padding: 1rem; display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.5rem;">
+                                <!-- JS로 인벤토리 내용 채움 -->
+                            </div>
+                            <p style="font-size: 0.8rem; color: #64748b; margin-top: 0.5rem;">※ 체크하지 않으면 맨손/신체 활동 위주로
+                                추천합니다.</p>
+                        </div>
+
+                        <div class="form-group">
+                            <label>추가 요청 사항 (선택)</label>
+                            <textarea id="aiCustomRequest" class="form-control" rows="3"
+                                placeholder="예: 아이들이 다투지 않도록 협동심을 기를 수 있는 활동, 준비 운동 포함 등"></textarea>
+                        </div>
+
+                        <button type="button" class="btn btn-primary" id="aiSubmitBtn" onclick="submitAIRecommend()"
+                            style="width: 100%; height: 50px; font-size: 1.1rem; font-weight: bold; background: linear-gradient(135deg, #6366f1, #a855f7); border: none; margin-top: 1rem;">
+                            <i data-lucide="wand-2" style="margin-right: 8px;"></i> AI 추천받기
+                        </button>
+                    </form>
+
+                    <!-- AI Result Area -->
+                    <div id="aiResultArea"
+                        style="display: none; margin-top: 2rem; padding: 2rem; background: #f8fafc; border-radius: 16px; border: 1px solid #e2e8f0; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);">
+                        <div id="aiLoading" style="text-align: center; padding: 3rem 0;">
+                            <div class="spinner"
+                                style="margin: 0 auto 1.5rem; width: 40px; height: 40px; border-width: 4px;">
+                            </div>
+                            <img src="https://media.giphy.com/media/3o7bu3XilJ5BOiSGic/giphy.gif"
+                                style="width: 100px; border-radius: 10px; margin-bottom: 1rem; display: none;">
+                            <p style="font-weight: 700; color: #4f46e5; font-size: 1.2rem;">AI가 창의적인 수업을 계획하고 있어요!</p>
+                            <p style="color: #64748b;">(약 5~10초 정도 소요됩니다)</p>
+                        </div>
+                        <div id="aiContent" class="markdown-body" style="line-height: 1.8;">
+                            <!-- AI 답변 렌더링 -->
+                        </div>
+                    </div>
+                </div>
+            </section>
         </main>
     </div>
 
@@ -474,6 +580,7 @@
             </div>
         </div>
     </div>
+
 </body>
 
 </html>

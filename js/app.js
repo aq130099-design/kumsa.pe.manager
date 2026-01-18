@@ -27,7 +27,276 @@ document.addEventListener('DOMContentLoaded', async () => {
     initAdminMode();
     updateDateDisplay();
     updateAdminState(); // Force UI to match initial admin state (hidden stats)
+
+    // Weather Initialization
+    fetchWeatherData();
 });
+
+// ==========================================
+// Weather & Air Quality Logic
+// ==========================================
+const WEATHER_API_KEY = '204e99e9f8f3e8833157ee067bc8eb3d'; // User's API key
+const CITY_COORDS = { lat: 35.2104, lon: 129.1171 }; // Busan (Geumsa-dong area)
+
+async function fetchWeatherData() {
+    const tempEl = document.getElementById('weatherTemp');
+    const iconEl = document.getElementById('weatherIcon');
+    const dustEl = document.getElementById('dustStatus');
+
+    if (!tempEl || !iconEl || !dustEl) return;
+
+    // Set initial loading state
+    tempEl.innerText = '...';
+    dustEl.innerText = '로딩';
+
+    // 1. Fetch Current Weather
+    try {
+        const weatherRes = await fetch(`https://api.openweathermap.org/data/2.5/weather?lat=${CITY_COORDS.lat}&lon=${CITY_COORDS.lon}&appid=${WEATHER_API_KEY}&units=metric`);
+
+        if (!weatherRes.ok) {
+            if (weatherRes.status === 401) throw new Error('API 키가まだ 활성화되지 않았습니다. (최대 2시간 소요)');
+            throw new Error(`날씨 서버 오류 (${weatherRes.status})`);
+        }
+
+        const weatherData = await weatherRes.json();
+        const widget = document.getElementById('weatherWidget');
+
+        if (weatherData.main && weatherData.weather) {
+            tempEl.innerText = `${Math.round(weatherData.main.temp)}°C`;
+            const iconCode = weatherData.weather[0].icon;
+            iconEl.innerHTML = `<img src="https://openweathermap.org/img/wn/${iconCode}@2x.png" alt="weather">`;
+
+            if (widget) {
+                widget.className = 'weather-widget';
+                if (iconCode.includes('n')) widget.classList.add('night');
+                else if (['01d', '02d'].includes(iconCode)) widget.classList.add('sunny');
+                else if (['03d', '04d', '50d'].includes(iconCode)) widget.classList.add('cloudy');
+                else if (['09d', '10d', '11d', '13d'].includes(iconCode)) widget.classList.add('rainy');
+            }
+        }
+    } catch (err) {
+        console.error('Weather Fetch Error:', err);
+        tempEl.innerText = '!';
+        tempEl.title = err.message;
+    }
+
+    // 2. Fetch Air Pollution (Fine Dust)
+    try {
+        const pollutionRes = await fetch(`https://api.openweathermap.org/data/2.5/air_pollution?lat=${CITY_COORDS.lat}&lon=${CITY_COORDS.lon}&appid=${WEATHER_API_KEY}`);
+
+        if (!pollutionRes.ok) {
+            throw new Error('미세먼지 서버 오류');
+        }
+
+        const pollutionData = await pollutionRes.json();
+
+        if (pollutionData.list && pollutionData.list[0]) {
+            const aqi = pollutionData.list[0].main.aqi;
+            const statusMap = {
+                1: { text: '좋음', class: 'good' },
+                2: { text: '보통', class: 'moderate' },
+                3: { text: '나쁨', class: 'unhealthy' },
+                4: { text: '매우나쁨', class: 'very-unhealthy' },
+                5: { text: '위험', class: 'hazardous' }
+            };
+            const status = statusMap[aqi] || { text: '정보없음', class: '' };
+            dustEl.innerText = status.text;
+            dustEl.className = 'dust-badge ' + status.class;
+        }
+    } catch (err) {
+        console.error('Pollution Fetch Error:', err);
+        dustEl.innerText = '대기';
+        dustEl.title = err.message;
+    }
+}
+
+// ==========================================
+// AI Activity Recommender ('오늘 뭐 하지?')
+// ==========================================
+const GEMINI_API_KEY = 'AIzaSyDDvFz3-JNeGgMMLDR8FpyLTiM9Oc2rSgM';
+
+function initAIRecommend() {
+    const itemsList = document.getElementById('aiItemsList');
+    if (!itemsList || itemsList.children.length > 0) return; // Already populated
+
+    // Populate items checkboxes from current inventory
+    itemsList.innerHTML = dataManager.inventory.map(item => `
+        <label class="ai-item-option">
+            <input type="checkbox" name="aiItem" value="${item.name}">
+            <span>${item.name}</span>
+        </label>
+    `).join('');
+
+    // Create icons for the new content
+    if (window.lucide) window.lucide.createIcons();
+}
+
+function filterAIItems() {
+    const searchText = document.getElementById('aiItemSearch').value.toLowerCase();
+    const items = document.querySelectorAll('.ai-item-option');
+
+    items.forEach(item => {
+        const itemName = item.querySelector('span').innerText.toLowerCase();
+        if (itemName.includes(searchText)) {
+            item.style.display = 'flex';
+        } else {
+            item.style.display = 'none';
+        }
+    });
+}
+
+function openAIRecommendModal() {
+    const modal = document.getElementById('aiRecommendModal');
+    const itemsList = document.getElementById('aiItemsList');
+    if (!modal || !itemsList) return;
+
+    // Populate items checkboxes from current inventory
+    itemsList.innerHTML = dataManager.inventory.map(item => `
+        <label class="ai-item-option">
+            <input type="checkbox" name="aiItem" value="${item.name}">
+            <span>${item.name}</span>
+        </label>
+    `).join('');
+
+    // Reset Form
+    document.getElementById('aiRecommendForm').reset();
+    document.getElementById('aiResultArea').style.display = 'none';
+    document.getElementById('aiSubmitBtn').disabled = false;
+
+    modal.classList.add('active');
+
+    // Ensure icons in modal are rendered if any
+    if (window.lucide) window.lucide.createIcons();
+}
+
+function closeAIRecommendModal() {
+    document.getElementById('aiRecommendModal').classList.remove('active');
+}
+
+async function submitAIRecommend() {
+    // Get Location (Radio)
+    const locationRadio = document.querySelector('input[name="aiLocation"]:checked');
+    const location = locationRadio ? locationRadio.value : '';
+
+    const gradeCheckboxes = document.querySelectorAll('#aiGrades input:checked');
+    const itemCheckboxes = document.querySelectorAll('#aiItemsList input:checked');
+    const customRequest = document.getElementById('aiCustomRequest').value;
+
+    if (!location) return alert('수업 장소를 선택해주세요.');
+    if (gradeCheckboxes.length === 0) return alert('대상 학년을 최소 하나 선택해주세요.');
+
+    const grades = Array.from(gradeCheckboxes).map(cb => cb.value).join(', ');
+    const items = Array.from(itemCheckboxes).map(cb => cb.value).join(', ') || '교구 없음 (신체 활동 위주)';
+
+    // UI Feedback
+    const submitBtn = document.getElementById('aiSubmitBtn');
+    const resultArea = document.getElementById('aiResultArea');
+    const loader = document.getElementById('aiLoading');
+    const content = document.getElementById('aiContent');
+
+    submitBtn.disabled = true;
+    submitBtn.innerText = '✨ AI가 생각하는 중...';
+    resultArea.style.display = 'block';
+    loader.style.display = 'block';
+    content.innerHTML = '';
+
+    try {
+        if (!GEMINI_API_KEY) {
+            throw new Error('Gemini API 키가 설정되지 않았습니다. 관리자에게 문의하세요.');
+        }
+
+        const prompt = `
+            당신은 초등학교 체육 교육 전문가입니다. 다음 조건에 맞는 창의적이고 재미있는 체육 수업 활동을 하나 추천해주세요.
+            
+            [조건]
+            - 장소: ${location}
+            - 대상: ${grades}
+            - 사용 가능한 교구: ${items}
+            - 추가 요청: ${customRequest || '없음'}
+            
+            [응답 형식]
+            ### 🎯 활동명: [활동 이름]
+            - **활동 목표**: [이 활동을 통해 배울 점]
+            - **상세 방법**:
+              1. [단계별 설명]
+              2. ...
+            - **준비물**: [선택한 교구 활용법]
+            
+            ### ⚠️ 안전 수칙 (매우 중요)
+            - [부상 방지를 위한 필수 주의사항]
+            
+            답변은 반드시 한국어로, 초등학교 선생님이 읽기 편한 친절한 말투로 작성해주세요.
+        `;
+
+        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                contents: [{ parts: [{ text: prompt }] }]
+            })
+        });
+
+        const data = await response.json();
+
+        if (data.error) {
+            throw new Error(data.error.message || 'AI 호출 중 오류가 발생했습니다.');
+        }
+
+        let aiText = data.candidates[0].content.parts[0].text;
+
+        // Robust Markdown Parsing Function
+        function formatAIResponse(text) {
+            let lines = text.split('\n');
+            let html = '';
+            let inList = false;
+
+            lines.forEach(line => {
+                line = line.trim();
+
+                // 1. Format Bold (**bold**)
+                line = line.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+
+                // 2. Headers (### Title)
+                if (line.startsWith('### ')) {
+                    if (inList) { html += '</ul>'; inList = false; }
+                    html += `<h3 class="ai-header">${line.substring(4)}</h3>`;
+                }
+                // 3. List Items (- Item or * Item)
+                else if (line.startsWith('- ') || line.startsWith('* ')) {
+                    if (!inList) { html += '<ul class="ai-list">'; inList = true; }
+                    html += `<li>${line.substring(2)}</li>`;
+                }
+                // 4. Safety Box (Special handling for ⚠️)
+                else if (line.startsWith('⚠️')) {
+                    if (inList) { html += '</ul>'; inList = false; }
+                    html += `<div class="ai-safety-box">${line}</div>`;
+                }
+                // 5. Normal Paragraphs
+                else if (line.length > 0) {
+                    if (inList) { html += '</ul>'; inList = false; }
+                    html += `<p>${line}</p>`;
+                }
+            });
+
+            if (inList) html += '</ul>';
+            return html;
+        }
+
+        const htmlResult = formatAIResponse(aiText);
+
+        loader.style.display = 'none';
+        content.innerHTML = htmlResult;
+
+    } catch (err) {
+        console.error('AI Error:', err);
+        loader.style.display = 'none';
+        content.innerHTML = `<p style="color: #ef4444; font-weight: bold;">❌ 추천 실패: ${err.message}</p>`;
+    } finally {
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = '<i data-lucide="wand-2"></i> 다시 추천받기';
+        if (window.lucide) window.lucide.createIcons();
+    }
+}
 
 // Dashboard Stats Logic
 function initDashboard() {
@@ -48,6 +317,11 @@ function renderRecentActivity() {
     list.innerHTML = '';
 
     const logs = dataManager.activityLogs || [];
+
+    // Sort logic (newest first) is handled in update logic or needs sort here
+    // Assuming pre-sorted or handling here:
+    // logs.sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp)); // Optional verify
+
     if (logs.length === 0) {
         list.innerHTML = '<li style="padding: 1rem; color: #94a3b8; text-align: center;">최근 활동이 없습니다.</li>';
         return;
@@ -135,6 +409,10 @@ function initTabs() {
             if (tabId === 'adminManage') {
                 // Trigger render when tab is clicked
                 renderAdminManage();
+            }
+
+            if (tabId === 'aiRecommend') {
+                initAIRecommend();
             }
 
             navItems.forEach(nav => nav.classList.remove('active'));
@@ -1552,8 +1830,8 @@ function updateDateDisplay() {
 function showConnectionStatus(isCloud) {
     const statusDiv = document.createElement('div');
     statusDiv.style.position = 'fixed';
-    statusDiv.style.top = '1rem';
-    statusDiv.style.right = '1rem';
+    statusDiv.style.top = '1.5rem';
+    statusDiv.style.right = '2rem';
     statusDiv.style.padding = '0.5rem 1rem';
     statusDiv.style.borderRadius = '20px';
     statusDiv.style.fontSize = '0.85rem';

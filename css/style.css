@@ -95,15 +95,34 @@ body {
 }
 
 header {
-    display: flex;
-    justify-content: space-between;
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    /* 3-column grid for absolute centering */
     align-items: center;
     margin-bottom: 2.5rem;
+    position: relative;
 }
 
 header h1 {
     font-size: 1.875rem;
     font-weight: 700;
+    margin: 0;
+    grid-column: 1;
+}
+
+.user-info {
+    grid-column: 2;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.5rem;
+    text-align: center;
+}
+
+.date {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--text-muted);
 }
 
 /* Dashboard Cards */
@@ -161,7 +180,129 @@ header h1 {
     font-weight: 700;
 }
 
-/* Timetable */
+/* Weather Widget - Premium Glassmorphism Design */
+.weather-widget {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1.5rem;
+    padding: 0.75rem 1.5rem;
+    border-radius: 50px;
+    /* Pill shape */
+    background: rgba(255, 255, 255, 0.85);
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.6);
+    box-shadow:
+        0 8px 32px rgba(31, 38, 135, 0.1),
+        inset 0 0 0 1px rgba(255, 255, 255, 0.5);
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    min-width: 200px;
+    animation: float 6s ease-in-out infinite;
+    margin-top: 0.5rem;
+}
+
+.weather-widget:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 12px 40px rgba(31, 38, 135, 0.15);
+}
+
+/* Weather Themes */
+.weather-widget.sunny {
+    background: linear-gradient(135deg, rgba(255, 237, 213, 0.9), rgba(254, 243, 199, 0.9));
+}
+
+.weather-widget.cloudy {
+    background: linear-gradient(135deg, rgba(241, 245, 249, 0.9), rgba(226, 232, 240, 0.9));
+}
+
+.weather-widget.rainy {
+    background: linear-gradient(135deg, rgba(219, 234, 254, 0.9), rgba(191, 219, 254, 0.9));
+}
+
+.weather-widget.night {
+    background: linear-gradient(135deg, rgba(30, 41, 59, 0.9), rgba(15, 23, 42, 0.9));
+    color: white;
+}
+
+.weather-widget.night .weather-temp,
+.weather-widget.night .dust-info,
+.weather-widget.night .dust-label {
+    color: white !important;
+}
+
+@keyframes float {
+
+    0%,
+    100% {
+        transform: translateY(0);
+    }
+
+    50% {
+        transform: translateY(-3px);
+    }
+}
+
+.weather-info {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.weather-icon img {
+    width: 42px;
+    height: 42px;
+    filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.1));
+}
+
+.weather-temp {
+    font-size: 1.5rem;
+    font-weight: 800;
+    color: #334155;
+    letter-spacing: -0.5px;
+}
+
+.dust-info {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    justify-content: center;
+    text-align: right;
+    border-left: 1px solid rgba(0, 0, 0, 0.1);
+    padding-left: 1rem;
+    height: 40px;
+}
+
+.dust-label {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    color: #64748b;
+    font-weight: 600;
+    margin-bottom: 2px;
+}
+
+.dust-badge {
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: #334155;
+}
+
+.dust-good {
+    color: #10b981 !important;
+}
+
+.dust-moderate {
+    color: #f59e0b !important;
+}
+
+.dust-bad {
+    color: #ef4444 !important;
+}
+
+.dust-very-bad {
+    color: #7f1d1d !important;
+}
+
+/* Timetable Controls */
 .timetable-controls {
     display: flex;
     justify-content: space-between;
@@ -172,6 +313,19 @@ header h1 {
 .location-filters {
     display: flex;
     gap: 0.5rem;
+}
+
+/* Weather Widget - Adjusted for center */
+.weather-widget {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 0.4rem 1.25rem;
+    background: rgba(255, 255, 255, 0.85);
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.5);
+    border-radius: 50px;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.05);
 }
 
 /* Dashboard Weekly Scheduler */
@@ -660,6 +814,8 @@ input:checked+.slider:before {
     overflow-y: auto;
     display: flex;
     flex-direction: column;
+    justify-content: center;
+    /* Center vertically */
     align-items: center;
     padding: 2px 0;
 }
@@ -902,4 +1058,203 @@ input:checked+.slider:before {
     background-color: #f1f5f9;
     color: #94a3b8;
     cursor: not-allowed;
+}
+
+/* Grade Chips Styling */
+.grade-selector {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+.grade-chip {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.5rem 1rem;
+    background: #f1f5f9;
+    border: 1px solid #e2e8f0;
+    border-radius: 9999px;
+    /* Pill shape */
+    cursor: pointer;
+    font-size: 0.9rem;
+    font-weight: 500;
+    color: #475569;
+    transition: all 0.2s ease;
+    user-select: none;
+}
+
+.grade-chip input {
+    display: none;
+    /* Hide default checkbox */
+}
+
+/* Checked State for Grade Chip */
+.grade-chip:has(input:checked) {
+    background: #6366f1;
+    color: white;
+    border-color: #6366f1;
+    box-shadow: 0 2px 4px rgba(99, 102, 241, 0.3);
+}
+
+.grade-chip:hover {
+    background: #e2e8f0;
+}
+
+.grade-chip:has(input:checked):hover {
+    background: #4f46e5;
+}
+
+/* AI Item List Styling */
+.ai-items-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)) !important;
+    /* Responsive Grid */
+    gap: 0.75rem !important;
+    background: #f8fafc;
+}
+
+.ai-item-option {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.75rem;
+    background: white;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.ai-item-option:hover {
+    border-color: #cbd5e1;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+}
+
+.ai-item-option input {
+    accent-color: #6366f1;
+    width: 16px;
+    height: 16px;
+}
+
+.ai-item-option span {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+#aiContent h3 {
+    color: #4f46e5;
+    margin-bottom: 0.75rem;
+    font-size: 1.15rem;
+    border-bottom: 2px solid #e0e7ff;
+    padding-bottom: 0.25rem;
+    margin-top: 1.5rem;
+}
+
+#aiContent ul {
+    list-style-type: none;
+    padding-left: 0;
+}
+
+#aiContent li {
+    position: relative;
+    padding-left: 1.25rem;
+    margin-bottom: 0.5rem;
+}
+
+#aiContent li::before {
+    content: "•";
+    color: #818cf8;
+    position: absolute;
+    left: 0;
+    font-weight: bold;
+}
+
+.ai-safety-box {
+    padding: 1rem;
+    margin-top: 1.5rem;
+    border-radius: 0 8px 8px 0;
+    font-size: 0.95rem;
+    line-height: 1.6;
+    font-weight: 500;
+}
+
+/* AI Content Styling */
+#aiContent h3.ai-header {
+    color: #4f46e5;
+    margin-top: 1.5rem;
+    margin-bottom: 0.75rem;
+    font-size: 1.2rem;
+    font-weight: 700;
+    border-bottom: 2px solid #e0e7ff;
+    padding-bottom: 0.5rem;
+}
+
+#aiContent ul.ai-list {
+    list-style-type: none;
+    padding-left: 0;
+    margin-bottom: 1rem;
+}
+
+#aiContent ul.ai-list li {
+    position: relative;
+    padding-left: 1.25rem;
+    margin-bottom: 0.5rem;
+    line-height: 1.7;
+    color: #334155;
+}
+
+#aiContent ul.ai-list li::before {
+    content: "•";
+    color: #6366f1;
+    font-weight: bold;
+    position: absolute;
+    left: 0;
+}
+
+#aiContent p {
+    margin-bottom: 1rem;
+    line-height: 1.7;
+    color: #1e293b;
+}
+
+#aiContent strong {
+    color: #1e293b;
+    font-weight: 700;
+    background: linear-gradient(120deg, #e0e7ff 0%, #e0e7ff 100%);
+    background-repeat: no-repeat;
+    background-size: 100% 40%;
+    background-position: 0 88%;
+}
+
+/* Location Radio Buttons */
+.location-radio {
+    position: relative;
+    cursor: pointer;
+}
+
+.location-radio input {
+    position: absolute;
+    opacity: 0;
+}
+
+.location-radio span {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.75rem;
+    background: white;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    font-weight: 600;
+    transition: all 0.2s;
+}
+
+.location-radio input:checked+span {
+    background: #eff6ff;
+    border-color: #6366f1;
+    color: #6366f1;
+    box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2);
 }
