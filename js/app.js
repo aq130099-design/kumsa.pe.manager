@@ -202,9 +202,6 @@ async function submitAIRecommend() {
     content.innerHTML = '';
 
     try {
-        if (!GEMINI_API_KEY) {
-            throw new Error('Gemini API 키가 설정되지 않았습니다. 관리자에게 문의하세요.');
-        }
 
         const prompt = `
             당신은 초등학교 체육 교육 전문가입니다. 다음 조건에 맞는 창의적이고 재미있는 체육 수업 활동을 하나 추천해주세요.
@@ -229,18 +226,32 @@ async function submitAIRecommend() {
             답변은 반드시 한국어로, 초등학교 선생님이 읽기 편한 친절한 말투로 작성해주세요.
         `;
 
-        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`, {
+        // Use Google Apps Script Proxy
+        // API_URL is defined in data.js
+        const response = await fetch(API_URL, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                contents: [{ parts: [{ text: prompt }] }]
+                action: 'aiRecommend',
+                data: { prompt: prompt }
             })
         });
 
         const data = await response.json();
 
+        // Check for errors from GAS or Gemini
         if (data.error) {
             throw new Error(data.error.message || 'AI 호출 중 오류가 발생했습니다.');
+        }
+
+        // GAS returns the raw text response in the body content (as per our GAS code)
+        // If the GAS returns a JSON with 'candidates' structure (which handleAIRequest does by returning text output of response)
+        // We need to parse it if it came back as a string, OR handle the structure.
+
+        // Our GAS handleAIRequest returns: ContentService.createTextOutput(response.getContentText())
+        // So 'data' variable here IS the JSON object from Gemini API directly.
+
+        if (!data.candidates || !data.candidates[0] || !data.candidates[0].content) {
+            throw new Error('AI 응답 형식이 올바르지 않습니다.');
         }
 
         let aiText = data.candidates[0].content.parts[0].text;
