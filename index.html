@@ -7,6 +7,7 @@
     <title>금사초등학교 통합 체육 관리 시스템</title>
     <link rel="stylesheet" href="css/style.css">
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Pretendard:wght@400;500;600;700&display=swap">
+    <link rel="icon" href="favicon.svg" type="image/svg+xml">
     <script src="https://cdn.jsdelivr.net/npm/lucide@latest/dist/umd/lucide.min.js"></script>
 </head>
 
@@ -58,18 +59,33 @@
         <!-- Main Content -->
         <main class="content">
             <header>
-                <h1 id="pageTitle">대시보드</h1>
-                <div class="user-info">
-                    <span class="date" id="currentDateDisplay">2026. 01. 17 (토)</span>
+                <div class="header-title-group">
+                    <div class="title-row">
+                        <h1 id="pageTitle">대시보드</h1>
+                        <div class="user-info">
+                            <span class="date" id="currentDateDisplay"></span>
+                        </div>
+                    </div>
+                    <p class="header-greeting">
+                        <span id="greetingText">오늘도 활기찬 체육 수업 되세요! 💪</span>
+                        <button id="greetingEditBtn" class="greeting-edit-btn" style="display: none;" title="인사말 수정">
+                            <i data-lucide="pencil" style="width: 14px; height: 14px;"></i>
+                        </button>
+                    </p>
+                </div>
+                <div class="header-right">
                     <div id="weatherWidget" class="weather-widget">
-                        <div class="weather-info">
-                            <span id="weatherIcon" class="weather-icon"></span>
-                            <span id="weatherTemp" class="weather-temp">--°C</span>
+                        <div class="weather-main">
+                            <div class="weather-icon" id="weatherIcon">
+                                <i data-lucide="sun"></i>
+                            </div>
+                            <div class="weather-temp" id="weatherTemp">--°C</div>
+                            <div class="weather-dust">
+                                <div id="dustStatus10" class="dust-badge">미세 --</div>
+                                <div id="dustStatus25" class="dust-badge">초미세 --</div>
+                            </div>
                         </div>
-                        <div class="dust-info">
-                            <span class="dust-label">미세먼지</span>
-                            <span id="dustStatus" class="dust-badge">--</span>
-                        </div>
+                        <!-- Forecast Strip will be appended here by JS -->
                     </div>
                 </div>
             </header>

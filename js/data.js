@@ -12,7 +12,8 @@ const STORAGE_KEYS = {
     RENTALS: 'gs_rentals',
     ADMIN_REQUESTS: 'gs_admin_requests',
     LOCATIONS: 'gs_locations',
-    ACTIVITY_LOGS: 'gs_activity_logs'
+    ACTIVITY_LOGS: 'gs_activity_logs',
+    GREETING: 'gs_greeting'
 };
 
 const defaultLocations = [
@@ -41,6 +42,7 @@ class DataManager {
         this.isCloudConnected = false;
         this.admins = [];
         this.currentUser = null;
+        this.greeting = '';
     }
 
     async init() {
@@ -132,6 +134,7 @@ class DataManager {
 
             this.locations = data.locations || defaultLocations;
             this.activityLogs = data.activityLogs || [];
+            this.greeting = data.greeting || '반갑습니다! 금사 체육 관리 시스템입니다.';
 
             this.isLoaded = true;
             this.isCloudConnected = true;
@@ -174,6 +177,20 @@ class DataManager {
         this.currentUser = null;
     }
 
+    // New: Generic Fetch for getting data (Weather, AI, etc.)
+    async fetchData(action, data = {}) {
+        try {
+            const response = await this.fetchWithTimeout(API_URL, {
+                method: 'POST',
+                body: JSON.stringify({ action, data })
+            }, 15000); // 15s timeout for external APIs
+            return await response.json();
+        } catch (e) {
+            console.error(`Fetch failed for ${action}:`, e);
+            return { success: false, error: e.toString() };
+        }
+    }
+
     loadFromLocal() {
         this.baseSchedule = JSON.parse(localStorage.getItem(STORAGE_KEYS.BASE_SCHEDULE)) || defaultBaseSchedule;
         this.weeklySchedule = JSON.parse(localStorage.getItem(STORAGE_KEYS.WEEKLY_SCHEDULE)) || [];
@@ -181,6 +198,7 @@ class DataManager {
         this.adminRequests = JSON.parse(localStorage.getItem(STORAGE_KEYS.ADMIN_REQUESTS)) || defaultAdminRequests;
         this.locations = JSON.parse(localStorage.getItem(STORAGE_KEYS.LOCATIONS)) || defaultLocations;
         this.activityLogs = JSON.parse(localStorage.getItem(STORAGE_KEYS.ACTIVITY_LOGS)) || [];
+        this.greeting = localStorage.getItem(STORAGE_KEYS.GREETING) || '반갑습니다! 금사 체육 관리 시스템입니다.';
         this.isLoaded = true;
         this.isCloudConnected = false;
     }
@@ -334,6 +352,8 @@ class DataManager {
             const date = new Date().toLocaleString("ko-KR", { timeZone: "Asia/Seoul" });
             // Prepend new log. Keep max 20 locally.
             this.activityLogs = [{ timestamp: date, message: payload.message }, ...this.activityLogs].slice(0, 20);
+        } else if (action === 'updateGreeting') {
+            this.greeting = payload.text;
         }
         // Save to local as backup
         this.saveLocalAll();
@@ -346,6 +366,7 @@ class DataManager {
         localStorage.setItem(STORAGE_KEYS.ADMIN_REQUESTS, JSON.stringify(this.adminRequests));
         localStorage.setItem(STORAGE_KEYS.LOCATIONS, JSON.stringify(this.locations));
         localStorage.setItem(STORAGE_KEYS.ACTIVITY_LOGS, JSON.stringify(this.activityLogs));
+        localStorage.setItem(STORAGE_KEYS.GREETING, this.greeting);
     }
 
     getScheduleForDate(dateString) {

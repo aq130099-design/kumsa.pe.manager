@@ -24,7 +24,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     initInventory();
     initRequests();
     initRepairs();
-    initAdminMode();
+    initRepairs();
+    initAdminMode(); // Admin toggles
+    initGreeting();  // Greeting logic
     updateDateDisplay();
     updateAdminState(); // Force UI to match initial admin state (hidden stats)
 
@@ -35,80 +37,195 @@ document.addEventListener('DOMContentLoaded', async () => {
 // ==========================================
 // Weather & Air Quality Logic
 // ==========================================
-const WEATHER_API_KEY = '204e99e9f8f3e8833157ee067bc8eb3d'; // User's API key
-const CITY_COORDS = { lat: 35.2104, lon: 129.1171 }; // Busan (Geumsa-dong area)
+// ==========================================
+// Weather & Air Quality Logic (KMA via GAS)
+// ==========================================
 
 async function fetchWeatherData() {
     const tempEl = document.getElementById('weatherTemp');
     const iconEl = document.getElementById('weatherIcon');
-    const dustEl = document.getElementById('dustStatus');
+    // dustStatus element removed, using dustStatus10/25 instead
+    const widget = document.getElementById('weatherWidget');
 
-    if (!tempEl || !iconEl || !dustEl) return;
+    if (!tempEl || !iconEl) return;
 
-    // Set initial loading state
+    // Loading State
     tempEl.innerText = '...';
-    dustEl.innerText = '로딩';
+    const dust10 = document.getElementById('dustStatus10');
+    const dust25 = document.getElementById('dustStatus25');
+    if (dust10) dust10.innerText = '미세 ...';
+    if (dust25) dust25.innerText = '초미세 ...';
 
-    // 1. Fetch Current Weather
     try {
-        const weatherRes = await fetch(`https://api.openweathermap.org/data/2.5/weather?lat=${CITY_COORDS.lat}&lon=${CITY_COORDS.lon}&appid=${WEATHER_API_KEY}&units=metric`);
+        // 1. Fetch from GAS (KMA Proxy)
+        const responsev = await dataManager.fetchData('getWeather');
 
-        if (!weatherRes.ok) {
-            if (weatherRes.status === 401) throw new Error('API 키가まだ 활성화되지 않았습니다. (최대 2시간 소요)');
-            throw new Error(`날씨 서버 오류 (${weatherRes.status})`);
+        // 2. Fetch Dust from GAS (AirKorea Proxy)
+        const dustResponse = await dataManager.fetchData('getDust');
+
+        // Handle Dust UI
+        if (dustResponse && dustResponse.success && dustResponse.data) {
+            const d = dustResponse.data;
+            const gradeMap = { 1: '좋음', 2: '보통', 3: '나쁨', 4: '매우나쁨' };
+            const colorMap = { 1: 'good', 2: 'normal', 3: 'bad', 4: 'very-bad' };
+
+            if (dust10) {
+                const g10 = parseInt(d.pm10Grade);
+                dust10.innerText = `미세: ${gradeMap[g10] || '정보없음'}`;
+                dust10.className = `dust-badge ${colorMap[g10] || ''}`;
+            }
+            if (dust25) {
+                const g25 = parseInt(d.pm25Grade);
+                dust25.innerText = `초미세: ${gradeMap[g25] || '정보없음'}`;
+                dust25.className = `dust-badge ${colorMap[g25] || ''}`;
+            }
         }
 
-        const weatherData = await weatherRes.json();
-        const widget = document.getElementById('weatherWidget');
+        /* 
+        const response = await dataManager.fetchData('getWeather');
+        if (!responsev || !responsev.success || !responsev.data) { // use responsev checks logic below 
+           // Compatible with existing logic
+        }
+        */
 
-        if (weatherData.main && weatherData.weather) {
-            tempEl.innerText = `${Math.round(weatherData.main.temp)}°C`;
-            const iconCode = weatherData.weather[0].icon;
-            iconEl.innerHTML = `<img src="https://openweathermap.org/img/wn/${iconCode}@2x.png" alt="weather">`;
+        // Reuse responsev as response for weather logic
+        const response = responsev;
+
+        if (!response || !response.success || !response.data) {
+            throw new Error(response?.error || '날씨 통신 실패');
+        }
+
+        const items = response.data; // Array of {category, fcstValue, fcstTime, ...}
+
+        // Group items by fcstTime
+        const forecasts = {};
+        items.forEach(item => {
+            if (!forecasts[item.fcstTime]) forecasts[item.fcstTime] = {};
+            forecasts[item.fcstTime][item.category] = item.fcstValue;
+        });
+
+        const times = Object.keys(forecasts).sort();
+        const current = forecasts[times[0]]; // Earliest available forecast is "Now"
+
+        // Render Current Weather
+        if (current) {
+            const temp = current.T1H;
+            const sky = parseInt(current.SKY);
+            const pty = parseInt(current.PTY);
+
+            tempEl.innerText = `${temp}°C`;
+
+            // Icon & Theme Logic (Using Images)
+            let iconCode = '01d'; // default sun
+            let themeClass = 'sunny';
+
+            // Map KMA PTY/SKY to OpenWeather Icon Codes
+            if (pty > 0) {
+                if ([1, 5].includes(pty)) { iconCode = '09d'; themeClass = 'rainy'; } // Rain
+                else if ([3, 7].includes(pty)) { iconCode = '13d'; themeClass = 'rainy'; } // Snow
+                else { iconCode = '11d'; themeClass = 'rainy'; } // Shower/Other
+            } else {
+                if (sky === 1) { iconCode = '01d'; themeClass = 'sunny'; } // Clear
+                else if (sky === 3) { iconCode = '02d'; themeClass = 'cloudy'; } // Partly Cloudy
+                else { iconCode = '04d'; themeClass = 'cloudy'; } // Cloudy
+            }
+
+            // Check Night
+            const nowHour = new Date().getHours();
+            const isNight = nowHour >= 19 || nowHour < 6;
+            if (isNight) {
+                themeClass = 'night';
+                iconCode = iconCode.replace('d', 'n');
+            }
+
+            // Use Image Element
+            iconEl.innerHTML = `<img src="https://openweathermap.org/img/wn/${iconCode}@4x.png" alt="weather" style="width: 64px; height: 64px;">`;
+
+            // Remove Lucide re-scan if not needed elsewhere, or keep it safe
+            // lucide.createIcons(); // Not needed for img
 
             if (widget) {
                 widget.className = 'weather-widget';
-                if (iconCode.includes('n')) widget.classList.add('night');
-                else if (['01d', '02d'].includes(iconCode)) widget.classList.add('sunny');
-                else if (['03d', '04d', '50d'].includes(iconCode)) widget.classList.add('cloudy');
-                else if (['09d', '10d', '11d', '13d'].includes(iconCode)) widget.classList.add('rainy');
+                widget.classList.add(themeClass);
             }
         }
+
+        // Render Forecast Strip (1~6 Periods)
+        // Standard Elementary Schedule (approx)
+        // 1: 09:00 -> Nearest 09:00
+        // 2: 09:50 -> Nearest 10:00
+        // 3: 10:40 -> Nearest 11:00
+        // 4: 11:30 -> Nearest 12:00
+        // 5: 13:00 -> Nearest 13:00
+        // 6: 13:50 -> Nearest 14:00
+
+        const periods = [
+            { label: '1교시', h: 9, m: 0 },
+            { label: '2교시', h: 9, m: 50 },
+            { label: '3교시', h: 10, m: 40 },
+            { label: '4교시', h: 11, m: 30 },
+            { label: '5교시', h: 13, m: 0 },
+            { label: '6교시', h: 13, m: 50 }
+        ];
+
+        let forecastHtml = '';
+
+        periods.forEach(p => {
+            // Calculate Nearest Hour
+            let targetHour = p.h;
+            if (p.m >= 30) targetHour += 1;
+
+            const timeKey = String(targetHour).padStart(2, '0') + '00';
+
+            const f = forecasts[timeKey];
+            if (f) {
+                const t_temp = f.T1H;
+                const t_sky = parseInt(f.SKY);
+                const t_pty = parseInt(f.PTY);
+
+                let iconUrl = '';
+                if (t_pty > 0) iconUrl = 'https://openweathermap.org/img/wn/09d.png';
+                else if (t_sky === 1) iconUrl = 'https://openweathermap.org/img/wn/01d.png';
+                else if (t_sky === 3) iconUrl = 'https://openweathermap.org/img/wn/02d.png';
+                else iconUrl = 'https://openweathermap.org/img/wn/04d.png';
+
+                forecastHtml += `
+                    <div class="weather-cell" style="min-width: 50px;">
+                        <span class="period" style="font-size: 0.75rem;">${p.label}</span>
+                        <img src="${iconUrl}" alt="weather" style="width: 32px; height: 32px;">
+                        <span class="temp" style="font-size: 0.8rem;">${t_temp}°C</span>
+                    </div>
+                 `;
+            } else {
+                forecastHtml += `
+                    <div class="weather-cell" style="min-width: 50px;">
+                        <span class="period" style="font-size: 0.75rem;">${p.label}</span>
+                        <span style="font-size: 0.8rem;">-</span>
+                    </div>
+                `;
+            }
+        });
+
+        // Inject into widget
+        let strip = widget.querySelector('.weather-forecast');
+        if (!strip) {
+            strip = document.createElement('div');
+            strip.className = 'weather-forecast';
+            widget.appendChild(strip);
+        }
+        strip.innerHTML = forecastHtml;
+
+
+
     } catch (err) {
-        console.error('Weather Fetch Error:', err);
+        console.error('Weather Sync Error:', err);
         tempEl.innerText = '!';
-        tempEl.title = err.message;
-    }
-
-    // 2. Fetch Air Pollution (Fine Dust)
-    try {
-        const pollutionRes = await fetch(`https://api.openweathermap.org/data/2.5/air_pollution?lat=${CITY_COORDS.lat}&lon=${CITY_COORDS.lon}&appid=${WEATHER_API_KEY}`);
-
-        if (!pollutionRes.ok) {
-            throw new Error('미세먼지 서버 오류');
-        }
-
-        const pollutionData = await pollutionRes.json();
-
-        if (pollutionData.list && pollutionData.list[0]) {
-            const aqi = pollutionData.list[0].main.aqi;
-            const statusMap = {
-                1: { text: '좋음', class: 'good' },
-                2: { text: '보통', class: 'moderate' },
-                3: { text: '나쁨', class: 'unhealthy' },
-                4: { text: '매우나쁨', class: 'very-unhealthy' },
-                5: { text: '위험', class: 'hazardous' }
-            };
-            const status = statusMap[aqi] || { text: '정보없음', class: '' };
-            dustEl.innerText = status.text;
-            dustEl.className = 'dust-badge ' + status.class;
-        }
-    } catch (err) {
-        console.error('Pollution Fetch Error:', err);
-        dustEl.innerText = '대기';
-        dustEl.title = err.message;
+        if (dust10) dust10.innerText = '!';
+        if (dust25) dust25.innerText = '!';
     }
 }
+
+
 
 // ==========================================
 // AI Activity Recommender ('오늘 뭐 하지?')
@@ -439,8 +556,21 @@ function initTabs() {
 
 // Timetable Rendering
 function initTimetable() {
+
     const dateInput = document.getElementById('timetableDate');
     const filterBtns = document.querySelectorAll('.filter-btn');
+
+    // Initialize with Today's Date (KST)
+    const now = new Date();
+    const utc = now.getTime() + (now.getTimezoneOffset() * 60000);
+    const kstGap = 9 * 60 * 60 * 1000; // UTC+9
+    const kstDate = new Date(utc + kstGap);
+
+    const year = kstDate.getFullYear();
+    const month = String(kstDate.getMonth() + 1).padStart(2, '0');
+    const day = String(kstDate.getDate()).padStart(2, '0');
+
+    dateInput.value = `${year}-${month}-${day}`;
 
     dateInput.addEventListener('change', renderTimetable);
     filterBtns.forEach(btn => {
@@ -586,6 +716,9 @@ function showDetailModal(booking, isSpecial) {
                 <button type="button" class="btn btn-primary" onclick="approveAndClose(${booking.id})">승인하기</button>
                 <button type="button" class="btn btn-danger" onclick="deleteAndClose(${booking.id})">반려/삭제</button>
             ` : ''}
+             ${isAdmin && !isPending && booking.status === '승인' ? `
+                <button type="button" class="btn btn-danger" onclick="cancelBooking(${booking.id})">승인 취소</button>
+            ` : ''}
             <button type="button" class="btn" style="background: #e2e8f0;" onclick="closeModal()">닫기</button>
         </div>
     `;
@@ -593,21 +726,111 @@ function showDetailModal(booking, isSpecial) {
 }
 
 // Global helper for modal actions
+// Global helper for modal actions
 window.approveAndClose = async (id) => {
     const booking = dataManager.weeklySchedule.find(b => b.id === id);
-    await dataManager.sync('approveBooking', { id });
+    if (!booking) return;
 
-    if (booking) {
-        const dateStr = formatDateForLog(booking.date);
-        const msg = `${booking.class}에서 신청한 ${dateStr} ${booking.period} ${booking.location} 사용이 승인되었습니다.`;
-        dataManager.sync('logActivity', { message: msg });
-        renderRecentActivity();
+    // Conflict Check
+    const overlaps = dataManager.weeklySchedule.filter(s =>
+        s.status === '승인' &&
+        s.date === booking.date &&
+        s.period === booking.period &&
+        s.location === booking.location &&
+        s.id !== id
+    );
+
+    if (overlaps.length > 0) {
+        showConflictModal(booking, overlaps);
+        return;
     }
+
+    // Normal Approval
+    await executeApproval(booking);
+};
+
+// Cancel Approved Booking (Admin Only)
+window.cancelBooking = async (id) => {
+    if (!confirm('정말 이 승인된 예약을 취소하시겠습니까? (기본 시간표로 돌아갑니다)')) return;
+
+    await dataManager.sync('deleteBooking', { id });
+
+    // Log Activity
+    dataManager.sync('logActivity', { message: '관리자가 승인된 예약을 취소했습니다.' });
 
     closeModal();
     renderTimetable();
+    renderDashboardWeekly(); // Refresh Dashboard Schedule
+    updateDashboardStats();
+    alert('예약이 취소되었습니다.');
+};
+
+// Extracted Approval Logic
+async function executeApproval(booking) {
+    await dataManager.sync('approveBooking', { id: booking.id });
+
+    // Log Activity
+    const dateStr = formatDateForLog(booking.date);
+    const msg = `${booking.class}에서 신청한 ${dateStr} ${booking.period} ${booking.location} 사용이 승인되었습니다.`;
+    dataManager.sync('logActivity', { message: msg });
+    renderRecentActivity();
+
+    closeModal();
+    renderTimetable();
+    renderDashboardWeekly(); // Refresh Dashboard Schedule
     updateDashboardStats();
     alert('승인되었습니다.');
+}
+
+// Conflict Resolution Modal
+window.showConflictModal = (booking, overlaps) => {
+    const form = document.getElementById('modalForm');
+    document.getElementById('modalTitle').innerText = '중복 예약 발생';
+
+    const conflictClasses = overlaps.map(o => o.class).join(', ');
+
+    form.innerHTML = `
+        <div style="padding: 1rem; background: #fff1f2; border-radius: 8px; border: 1px solid #fda4af; margin-bottom: 1.5rem;">
+            <p style="color: #be123c; font-weight: 600; margin-bottom: 0.5rem;">⚠️ 이미 승인된 예약이 있습니다.</p>
+            <p><strong>기존 예약:</strong> ${conflictClasses}</p>
+            <p><strong>현재 승인 요청:</strong> ${booking.class}</p>
+        </div>
+
+        <div style="display: flex; flex-direction: column; gap: 10px;">
+            <button type="button" class="btn" style="background: #e2e8f0; color:#334155; justify-content: space-between;" onclick="confirmDuplicateApproval(${booking.id})">
+                <span>중복 승인 (둘 다 표시)</span>
+                <i data-lucide="users"></i>
+            </button>
+            <button type="button" class="btn" style="background: #be123c; color:white; justify-content: space-between;" onclick="confirmReplaceApproval(${booking.id}, [${overlaps.map(o => o.id).join(',')}])">
+                <span>대체 승인 (기존 예약 취소)</span>
+                <i data-lucide="refresh-cw"></i>
+            </button>
+        </div>
+
+        <div class="modal-actions" style="margin-top: 1.5rem;">
+            <button type="button" class="btn" onclick="showPendingApprovalsModal()">돌아가기</button>
+            <button type="button" class="btn" onclick="closeModal()">취소</button>
+        </div>
+    `;
+    lucide.createIcons();
+    form.onsubmit = (e) => e.preventDefault();
+};
+
+window.confirmDuplicateApproval = async (id) => {
+    const booking = dataManager.weeklySchedule.find(b => b.id === id);
+    if (booking) await executeApproval(booking);
+};
+
+window.confirmReplaceApproval = async (newId, oldIds) => {
+    if (!confirm('기존 예약을 취소하고 현재 요청을 승인하시겠습니까?')) return;
+
+    // Delete existing approvals
+    for (const oldId of oldIds) {
+        await dataManager.sync('deleteBooking', { id: oldId });
+    }
+
+    // Approve new one
+    await confirmDuplicateApproval(newId);
 };
 
 window.deleteAndClose = (id) => {
@@ -1722,6 +1945,40 @@ function updateAdminState() {
     if (statsGrid) {
         statsGrid.style.display = isAdmin ? 'grid' : 'none';
     }
+
+    // Toggle Greeting Edit Button
+    const greetingBtn = document.getElementById('greetingEditBtn');
+    if (greetingBtn) {
+        greetingBtn.style.display = isAdmin ? 'inline-flex' : 'none';
+    }
+}
+
+function initGreeting() {
+    const textEl = document.getElementById('greetingText');
+    const btn = document.getElementById('greetingEditBtn');
+
+    // 1. Load from DataManager
+    if (dataManager.greeting && textEl) {
+        textEl.innerText = dataManager.greeting;
+    }
+
+    // 2. Click Handler
+    if (btn && textEl) {
+        btn.onclick = async () => {
+            const current = textEl.innerText;
+            const newText = prompt('새로운 인사말을 입력하세요:', current);
+            if (newText && newText.trim() !== '') {
+                try {
+                    await dataManager.sync('updateGreeting', { text: newText.trim() });
+                    textEl.innerText = newText.trim();
+                    alert('인사말이 변경되어 모든 컴퓨터에 적용됩니다.');
+                } catch (err) {
+                    console.error(err);
+                    alert('인사말 변경 중 오류가 발생했습니다.');
+                }
+            }
+        };
+    }
 }
 
 // ==========================================
@@ -1842,8 +2099,11 @@ function updateDateDisplay() {
 function showConnectionStatus(isCloud) {
     const statusDiv = document.createElement('div');
     statusDiv.style.position = 'fixed';
-    statusDiv.style.top = '1.5rem';
-    statusDiv.style.right = '2rem';
+    statusDiv.style.bottom = '2rem'; /* Moved to bottom */
+    statusDiv.style.right = '2rem';  /* Moved to right */
+    statusDiv.style.top = 'unset';   /* Clear top */
+    statusDiv.style.left = 'unset';  /* Clear left */
+    statusDiv.style.transform = 'none'; /* Clear transform */
     statusDiv.style.padding = '0.5rem 1rem';
     statusDiv.style.borderRadius = '20px';
     statusDiv.style.fontSize = '0.85rem';
@@ -2225,16 +2485,18 @@ window.renderDashboardWeekly = () => {
 
             // Logic: 
             // - If Approved exists, it OVERRIDES Base.
+            // - Conflict Logic: If MULTIPLE approved exist, show ALL.
             // - If Pending exists, it shows BELOW Base (or alone).
 
-            const approved = specials.find(s => s.status === '승인');
+            const approvedList = specials.filter(s => s.status === '승인');
             const pendings = specials.filter(s => s.status === '대기');
 
             let cellContent = '';
 
-            if (approved) {
+            if (approvedList.length > 0) {
                 // Approved overrides everything
-                cellContent = `<span class="cell-special-approved">${approved.class}</span>`;
+                const classes = approvedList.map(a => a.class).join(', ');
+                cellContent = `<span class="cell-special-approved">${classes}</span>`;
             } else {
                 // Show Base
                 if (baseClass) {
