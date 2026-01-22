@@ -1,18 +1,27 @@
-/**
- * UI Controller for Geumsa P.E. System
- */
-
 document.addEventListener('DOMContentLoaded', async () => {
+    // 1. Session Check & Background Setup
+    // If session exists, immediately switch background to app-mode (hides login screen)
+    // BUT kept the loader on top so user doesn't see empty dashboard
+    if (dataManager.currentUser && dataManager.currentUser.id) {
+        document.body.classList.add('app-mode');
+    }
+
     // Show loading state
     const body = document.body;
     const loader = document.createElement('div');
     loader.id = 'appLoader';
-    loader.innerHTML = '<div class="spinner"></div><p>구글 시트에서 데이터를 불러오는 중...</p>';
+    loader.innerHTML = '<div class="spinner"></div><p>데이터 연동 중...</p>';
     body.appendChild(loader);
 
+    // 2. Await Data Sync (CRITICAL)
+    // Wait until ALL data is loaded from Google Sheets
     await dataManager.init();
 
-    // Remove loader
+    // 3. Final Render
+    // Now data is ready, render the full UI
+    updateView();
+
+    // Remove loader only after UI is ready
     loader.remove();
 
     // Show connection status
@@ -24,15 +33,120 @@ document.addEventListener('DOMContentLoaded', async () => {
     initInventory();
     initRequests();
     initRepairs();
-    initRepairs();
-    initAdminMode(); // Admin toggles
+    // initAdminMode(); // Removed: Admin features are now automatic based on role
     initGreeting();  // Greeting logic
     updateDateDisplay();
-    updateAdminState(); // Force UI to match initial admin state (hidden stats)
+    updateAdminState();
+
+    // Bind login form submit event - Handled in HTML onsubmit
+    // const loginForm = document.getElementById('loginForm');
+    // if (loginForm) {
+    //     loginForm.addEventListener('submit', function (e) {
+    //         e.preventDefault();
+    //         submitLogin();
+    //     });
+    // }
 
     // Weather Initialization
     fetchWeatherData();
 });
+
+function updateView() {
+    try {
+        const body = document.body;
+        const user = dataManager.currentUser;
+        const authSection = document.getElementById('authSection');
+        const mainSection = document.getElementById('mainAppSection');
+
+        if (user && user.id) {
+            // 로그인 상태: 클래스 교체로 CSS 제어
+            console.log('[DEBUG] updateView: User Logged In:', user.id);
+            body.classList.remove('auth-mode');
+            body.classList.add('app-mode');
+
+            // If data is fully loaded, refresh UI components
+            if (dataManager.isLoaded) {
+                setTimeout(() => {
+                    try {
+                        updateUIForUser();
+                    } catch (e) { console.error(e); }
+                }, 50);
+            }
+        } else {
+            // 로그아웃 상태
+            body.classList.remove('app-mode');
+            body.classList.add('auth-mode');
+
+            if (typeof populateUserDropdown === 'function') populateUserDropdown();
+        }
+    } catch (err) {
+        console.error('[CRITICAL] updateView failed:', err);
+    }
+}
+
+
+function updateUIForUser() {
+    try {
+        if (!dataManager.currentUser) return;
+        const userRole = dataManager.currentUser.role;
+        const adminTabBtn = document.getElementById('adminManageSidebarBtn');
+
+        // Show User Management only for Master
+        if (adminTabBtn) {
+            adminTabBtn.style.display = (userRole === 'master') ? 'flex' : 'none';
+        }
+
+        // Refresh components
+        if (typeof renderDashboardWeekly === 'function') renderDashboardWeekly();
+        if (typeof updateDashboardStats === 'function') updateDashboardStats();
+        if (typeof renderRecentActivity === 'function') renderRecentActivity();
+        if (typeof updateAdminState === 'function') updateAdminState();
+
+        console.log('UI Updated for user:', dataManager.currentUser.id);
+    } catch (e) {
+        console.error('updateUIForUser failure:', e);
+    }
+}
+
+/* Auth Modal Controllers - defined early for reliability */
+window.showLoginModal = () => {
+    const modal = document.getElementById('loginModal');
+    if (modal) {
+        modal.style.display = 'block';
+        if (typeof populateUserDropdown === 'function') populateUserDropdown();
+
+        // Bind click event directly to the login button
+    } else {
+        console.error('Login modal not found');
+    }
+};
+
+window.closeAuthModals = () => {
+    document.querySelectorAll('.modal').forEach(m => {
+        if (m.id.includes('Modal') && (m.id === 'loginModal' || m.id === 'registerModal' || m.id === 'profileEditModal')) {
+            m.style.display = 'none';
+        }
+    });
+};
+
+function populateUserDropdown() {
+    const select = document.getElementById('loginUserSelect');
+    if (!select) return;
+
+    // Keep the first option
+    const firstOption = select.options[0];
+    select.innerHTML = '';
+    select.appendChild(firstOption);
+
+    dataManager.admins.forEach(user => {
+        if (user.status !== 'pending') {
+            const opt = document.createElement('option');
+            opt.value = user.id;
+            opt.textContent = user.id + (user.name ? ` (${user.name})` : '');
+            select.appendChild(opt);
+        }
+    });
+}
 
 // ==========================================
 // Weather & Air Quality Logic
@@ -121,9 +235,18 @@ async function fetchWeatherData() {
 
             // Map KMA PTY/SKY to OpenWeather Icon Codes
             if (pty > 0) {
-                if ([1, 5].includes(pty)) { iconCode = '09d'; themeClass = 'rainy'; } // Rain
-                else if ([3, 7].includes(pty)) { iconCode = '13d'; themeClass = 'rainy'; } // Snow
-                else { iconCode = '11d'; themeClass = 'rainy'; } // Shower/Other
+                if ([1, 4, 5].includes(pty)) {
+                    iconCode = '09d';
+                    themeClass = 'rainy';
+                } // Rain/Shower
+                else if ([2, 3, 6, 7].includes(pty)) {
+                    iconCode = '13d';
+                    themeClass = 'snowy';
+                } // Snow/Sleet
+                else {
+                    iconCode = '11d';
+                    themeClass = 'rainy';
+                }
             } else {
                 if (sky === 1) { iconCode = '01d'; themeClass = 'sunny'; } // Clear
                 else if (sky === 3) { iconCode = '02d'; themeClass = 'cloudy'; } // Partly Cloudy
@@ -474,55 +597,59 @@ function renderRecentActivity() {
 }
 
 function updateDashboardStats() {
-    // 대기 중인 승인: weeklySchedule 중 status 가 '대기'인 것
-    const pendingCount = dataManager.weeklySchedule.filter(s => s.status === '대기').length;
+    try {
+        // 대기 중인 승인
+        const pendingCount = (dataManager.weeklySchedule || []).filter(s => s.status === '대기').length;
+        const pendingEl = document.getElementById('statPendingApprovals');
+        if (pendingEl) pendingEl.innerText = `${pendingCount}건`;
 
-    // 미반납 비품: inventory 대여 중 returned 가 false 인 대여 건수 합계
-    const unreturnedCount = dataManager.inventory.reduce((sum, item) => {
-        return sum + item.rentals.filter(r => !r.returned).length;
-    }, 0);
+        // 미반납 비품
+        const unreturnedCount = (dataManager.inventory || []).reduce((sum, item) => {
+            return sum + (item.rentals || []).filter(r => !r.returned).length;
+        }, 0);
+        const unreturnedEl = document.getElementById('statUnreturnedItems');
+        if (unreturnedEl) unreturnedEl.innerText = `${unreturnedCount}건`;
 
-    const pendingEl = document.getElementById('statPendingApprovals');
-    if (pendingEl) pendingEl.innerText = `${pendingCount}건`;
+        // 1. Purchase Requests
+        const requests = dataManager.adminRequests || [];
+        const purchases = requests.filter(r => r.type === '구매');
+        const purPending = purchases.filter(r => r.status === '대기').length;
+        const purProgress = purchases.filter(r => r.status === '진행').length;
 
-    document.getElementById('statUnreturnedItems').innerText = `${unreturnedCount}건`;
+        const purPendingEl = document.getElementById('statPurchasePending');
+        const purProgressEl = document.getElementById('statPurchaseProgress');
+        if (purPendingEl) purPendingEl.innerText = `대기 ${purPending}건`;
+        if (purProgressEl) purProgressEl.innerText = `진행 ${purProgress}건`;
 
-    // 1. Purchase Requests (구매)
-    const purchases = dataManager.adminRequests.filter(r => r.type === '구매');
-    const purPending = purchases.filter(r => r.status === '대기').length;
-    const purProgress = purchases.filter(r => r.status === '진행').length;
+        // 2. Repair Requests
+        let repairPending = 0;
+        let repairProgress = 0;
+        (dataManager.inventory || []).forEach(item => {
+            if (item.repairs) {
+                item.repairs.forEach(r => {
+                    if (r.status === '대기') repairPending++;
+                    else if (r.status === '수리중' || r.status === '진행') repairProgress++;
+                });
+            }
+        });
 
-    const purPendingEl = document.getElementById('statPurchasePending');
-    const purProgressEl = document.getElementById('statPurchaseProgress');
-    if (purPendingEl) purPendingEl.innerText = `대기 ${purPending}건`;
-    if (purProgressEl) purProgressEl.innerText = `진행 ${purProgress}건`;
+        const repPendingEl = document.getElementById('statRepairPending');
+        const repProgressEl = document.getElementById('statRepairProgress');
+        if (repPendingEl) repPendingEl.innerText = `대기 ${repairPending}건`;
+        if (repProgressEl) repProgressEl.innerText = `수리 ${repairProgress}건`;
 
-    // 2. Repair Requests (수리) -> from Inventory
-    let repairPending = 0;
-    let repairProgress = 0;
-    dataManager.inventory.forEach(item => {
-        if (item.repairs) {
-            item.repairs.forEach(r => {
-                if (r.status === '대기') repairPending++;
-                else if (r.status === '수리중' || r.status === '진행') repairProgress++;
-            });
-        }
-    });
+        // 3. Bug Reports
+        const bugs = requests.filter(r => r.type === '버그');
+        const bugPending = bugs.filter(r => r.status === '대기').length;
+        const bugProgress = bugs.filter(r => r.status === '진행').length;
 
-    const repPendingEl = document.getElementById('statRepairPending');
-    const repProgressEl = document.getElementById('statRepairProgress');
-    if (repPendingEl) repPendingEl.innerText = `대기 ${repairPending}건`;
-    if (repProgressEl) repProgressEl.innerText = `수리 ${repairProgress}건`;
-
-    // 3. Bug Reports (버그)
-    const bugs = dataManager.adminRequests.filter(r => r.type === '버그');
-    const bugPending = bugs.filter(r => r.status === '대기').length;
-    const bugProgress = bugs.filter(r => r.status === '진행').length;
-
-    const bugPendingEl = document.getElementById('statBugPending');
-    const bugProgressEl = document.getElementById('statBugProgress');
-    if (bugPendingEl) bugPendingEl.innerText = `대기 ${bugPending}건`;
-    if (bugProgressEl) bugProgressEl.innerText = `진행 ${bugProgress}건`;
+        const bugPendingEl = document.getElementById('statBugPending');
+        const bugProgressEl = document.getElementById('statBugProgress');
+        if (bugPendingEl) bugPendingEl.innerText = `대기 ${bugPending}건`;
+        if (bugProgressEl) bugProgressEl.innerText = `진행 ${bugProgress}건`;
+    } catch (e) {
+        console.warn('Dashboard stats refresh failed:', e);
+    }
 }
 
 // Tab Management
@@ -532,11 +659,16 @@ function initTabs() {
 
     navItems.forEach(item => {
         item.addEventListener('click', () => {
-            // Handle Admin Management Sidebar Click separately
             const tabId = item.getAttribute('data-tab');
+            if (!tabId) return; // Ignore if no tabId (e.g., profile edit button)
+
+            const targetSection = document.getElementById(tabId);
+            if (!targetSection) {
+                console.warn(`Tab section for "${tabId}" not found`);
+                return;
+            }
 
             if (tabId === 'adminManage') {
-                // Trigger render when tab is clicked
                 renderAdminManage();
             }
 
@@ -548,7 +680,7 @@ function initTabs() {
             tabContents.forEach(content => content.classList.remove('active'));
 
             item.classList.add('active');
-            document.getElementById(tabId).classList.add('active');
+            targetSection.classList.add('active');
             document.getElementById('pageTitle').innerText = item.innerText.trim();
         });
     });
@@ -695,6 +827,32 @@ function createBookingCard(booking, isSpecial) {
     return card;
 }
 
+// Help Check if user can approve this booking (Admin or Owner of Base Slot)
+function canApproveBooking(booking) {
+    if (isAdminMode()) return true;
+    if (!dataManager.currentUser) return false;
+
+    // Special bookings always have a date
+    if (!booking.date) return false;
+
+    // Find day of week
+    const date = new Date(booking.date);
+    const days = ['일요일', '월요일', '화요일', '수요일', '목요일', '금요일', '토요일'];
+    const dayOfWeek = days[date.getDay()];
+
+    // Find owners in base schedule
+    const ownerSlot = dataManager.baseSchedule.find(b =>
+        b.day === dayOfWeek &&
+        b.period === booking.period &&
+        b.location === booking.location
+    );
+
+    if (!ownerSlot) return false;
+
+    // Check match
+    return String(ownerSlot.class) === String(dataManager.currentUser.class);
+}
+
 function showDetailModal(booking, isSpecial) {
     modal.style.display = 'block';
     const form = document.getElementById('modalForm');
@@ -702,6 +860,8 @@ function showDetailModal(booking, isSpecial) {
 
     const isAdmin = isAdminMode();
     const isPending = !booking.status || booking.status === '대기';
+
+    const canApprove = isSpecial && isPending && canApproveBooking(booking);
 
     form.innerHTML = `
         <div class="detail-info">
@@ -712,7 +872,7 @@ function showDetailModal(booking, isSpecial) {
             ${isSpecial ? '<div class="info-row"><span>구분</span><strong>특별 예약</strong></div>' : ''}
         </div>
         <div class="modal-actions">
-            ${isAdmin && isPending ? `
+            ${canApprove ? `
                 <button type="button" class="btn btn-primary" onclick="approveAndClose(${booking.id})">승인하기</button>
                 <button type="button" class="btn btn-danger" onclick="deleteAndClose(${booking.id})">반려/삭제</button>
             ` : ''}
@@ -812,7 +972,7 @@ window.showConflictModal = (booking, overlaps) => {
             <button type="button" class="btn" onclick="closeModal()">취소</button>
         </div>
     `;
-    lucide.createIcons();
+    if (window.lucide) lucide.createIcons();
     form.onsubmit = (e) => e.preventDefault();
 };
 
@@ -868,7 +1028,7 @@ window.confirmDeleteAction = async (id) => {
             <button type="button" class="btn btn-primary" onclick="closeModal()">확인</button>
         </div>
     `;
-    lucide.createIcons();
+    if (window.lucide) lucide.createIcons();
     renderTimetable();
     updateDashboardStats();
 };
@@ -1048,7 +1208,7 @@ function initInventory() {
 
         tbody.appendChild(tr);
     });
-    lucide.createIcons();
+    if (window.lucide) lucide.createIcons();
 }
 
 window.handleRental = (id) => {
@@ -1142,7 +1302,7 @@ window.showReturnListModal = (id) => {
         </div>
     `;
     form.onsubmit = (e) => e.preventDefault();
-    lucide.createIcons();
+    if (window.lucide) lucide.createIcons();
 };
 
 window.processReturn = (itemId, rentalId) => {
@@ -1195,7 +1355,7 @@ window.confirmReturnAction = async (itemId, rentalId) => {
                 <button type="button" class="btn btn-primary" onclick="handlePostReturn(${itemId})">확인</button>
             </div>
         `;
-        lucide.createIcons();
+        if (window.lucide) lucide.createIcons();
         initInventory();
         updateDashboardStats();
     }
@@ -1249,7 +1409,7 @@ window.executeInventoryDelete = async (id) => {
             <button type="button" class="btn btn-primary" onclick="closeModal()">확인</button>
         </div>
     `;
-    lucide.createIcons();
+    if (window.lucide) lucide.createIcons();
     initInventory();
     updateDashboardStats();
 
@@ -1293,7 +1453,7 @@ function renderRequestList(typeFilter, tbodyId) {
         `;
         tbody.appendChild(tr);
     });
-    lucide.createIcons();
+    if (window.lucide) lucide.createIcons();
 }
 
 window.confirmDeleteRequest = (id) => {
@@ -1333,7 +1493,7 @@ window.executeRequestDelete = async (id) => {
             <button type="button" class="btn btn-primary" onclick="closeModal()">확인</button>
         </div>
     `;
-    lucide.createIcons();
+    if (window.lucide) lucide.createIcons();
     initRequests();
     updateDashboardStats();
 
@@ -1384,7 +1544,7 @@ function initRepairs() {
         `;
         tbody.appendChild(tr);
     });
-    lucide.createIcons();
+    if (window.lucide) lucide.createIcons();
 }
 
 function showNewRepairModal() {
@@ -1455,7 +1615,7 @@ function showNewRepairModal() {
             <button type="button" class="btn" onclick="closeModal()">취소</button>
         </div>
     `;
-    lucide.createIcons();
+    if (window.lucide) lucide.createIcons();
 
     // Selection Logic attached to window for inline onclick access
     // Selection Logic attached to window for inline onclick access
@@ -1490,7 +1650,7 @@ function showNewRepairModal() {
         }
 
         // Re-init icons for the newly visible check
-        lucide.createIcons();
+        if (window.lucide) lucide.createIcons();
     };
 
 
@@ -1888,38 +2048,13 @@ window.showRequestModal = (id) => {
 };
 
 
-// Admin Mode
-function initAdminMode() {
-    const toggle = document.getElementById('adminModeToggle');
-    if (!toggle) return;
-
-    toggle.addEventListener('change', (e) => {
-        if (e.target.checked) {
-            // Turning ON
-            if (!dataManager.currentUser) {
-                e.preventDefault();
-                e.target.checked = false; // Revert visual
-                showLoginModal();
-            } else {
-                updateAdminState();
-            }
-        } else {
-            // Turning OFF
-            if (confirm('관리자 모드를 종료하고 로그아웃 하시겠습니까?')) {
-                dataManager.logout();
-                updateAdminState();
-                initInventory();
-            } else {
-                e.preventDefault();
-                e.target.checked = true; // Revert
-            }
-        }
-    });
-}
-
+// Admin Mode - Refactored to be automatic based on role
 function updateAdminState() {
     const isAdmin = isAdminMode();
-    const toggle = document.getElementById('adminModeToggle');
+    const isMaster = dataManager.currentUser && dataManager.currentUser.role === 'master';
+    const isManager = dataManager.currentUser && dataManager.currentUser.role === 'manager';
+
+    console.log(`[DEBUG] Updating Admin State. Role: ${dataManager.currentUser?.role}, isAdmin: ${isAdmin}`);
 
     // Refresh Logic 
     renderTimetable();
@@ -1934,7 +2069,6 @@ function updateAdminState() {
     }
 
     // Toggle Master Sidebar Item
-    const isMaster = dataManager.currentUser && dataManager.currentUser.role === 'master';
     const adminSidebarBtn = document.getElementById('adminManageSidebarBtn');
     if (adminSidebarBtn) {
         adminSidebarBtn.style.display = isMaster && isAdmin ? 'flex' : 'none';
@@ -2087,7 +2221,9 @@ window.saveBaseSchedule = async () => {
 };
 
 function isAdminMode() {
-    return document.getElementById('adminModeToggle').checked;
+    if (!dataManager.currentUser) return false;
+    const role = dataManager.currentUser.role;
+    return role === 'master' || role === 'manager';
 }
 
 function updateDateDisplay() {
@@ -2097,38 +2233,24 @@ function updateDateDisplay() {
 }
 
 function showConnectionStatus(isCloud) {
-    const statusDiv = document.createElement('div');
-    statusDiv.style.position = 'fixed';
-    statusDiv.style.bottom = '2rem'; /* Moved to bottom */
-    statusDiv.style.right = '2rem';  /* Moved to right */
-    statusDiv.style.top = 'unset';   /* Clear top */
-    statusDiv.style.left = 'unset';  /* Clear left */
-    statusDiv.style.transform = 'none'; /* Clear transform */
-    statusDiv.style.padding = '0.5rem 1rem';
-    statusDiv.style.borderRadius = '20px';
-    statusDiv.style.fontSize = '0.85rem';
-    statusDiv.style.fontWeight = '600';
-    statusDiv.style.zIndex = '9999';
-    statusDiv.style.boxShadow = '0 2px 5px rgba(0,0,0,0.1)';
-    statusDiv.style.transition = 'all 0.3s ease';
+    const statusText = document.getElementById('connectionText');
+    const statusIcon = document.querySelector('#connectionStatus i');
+    const container = document.getElementById('connectionStatus');
+
+    if (!statusText || !container) return; // Sidebar not present
+
+    const msg = (arguments.length > 1 && arguments[1]) ? arguments[1] : (isCloud ? '클라우드 연결됨' : '오프라인 모드');
+    statusText.innerText = msg;
 
     if (isCloud) {
-        statusDiv.style.background = '#e0f2fe';
-        statusDiv.style.color = '#0284c7';
-        statusDiv.innerHTML = '<i data-lucide="cloud" style="vertical-align: text-bottom; margin-right: 4px; width: 16px;"></i> 클라우드 연결됨';
+        container.style.color = '#0284c7';
+        if (statusIcon) statusIcon.setAttribute('data-lucide', 'cloud');
     } else {
-        statusDiv.style.background = '#fef2f2';
-        statusDiv.style.color = '#ef4444';
-        statusDiv.innerHTML = '<i data-lucide="wifi-off" style="vertical-align: text-bottom; margin-right: 4px; width: 16px;"></i> 오프라인 모드';
+        container.style.color = '#ef4444';
+        if (statusIcon) statusIcon.setAttribute('data-lucide', 'wifi-off');
     }
 
-    document.body.appendChild(statusDiv);
-    lucide.createIcons();
-
-    // Fade out after 5 seconds
-    setTimeout(() => {
-        statusDiv.style.opacity = '0.5';
-    }, 5000);
+    if (window.lucide) lucide.createIcons();
 }
 
 window.showEditInventoryModal = (id) => {
@@ -2161,71 +2283,20 @@ window.showEditInventoryModal = (id) => {
 
 // --- Admin Auth Modals ---
 
+// --- Admin Auth Modals (Corrected) ---
+
 window.showLoginModal = () => {
-    modal.style.display = 'block';
-    const form = document.getElementById('modalForm');
-    document.getElementById('modalTitle').innerText = '관리자 로그인';
-
-    // Dropdown options
-    const options = dataManager.admins.map(a => `<option value="${a.id}">${a.id}</option>`).join('');
-
-    form.innerHTML = `
-        <div class="form-group">
-            <label>관리자 선택</label>
-            <select id="loginId" style="width: 100%; padding: 0.5rem; border: 1px solid #cbd5e1; border-radius: 6px;">
-                <option value="" disabled selected>선택하세요</option>
-                ${options}
-            </select>
-        </div>
-        <div class="form-group">
-            <label>비밀번호 (숫자 4자리)</label>
-            <input type="password" id="loginPw" maxlength="4" placeholder="****" required style="width: 100%; padding: 0.5rem; border: 1px solid #cbd5e1; border-radius: 6px;">
-        </div>
-        <div class="modal-actions" style="flex-wrap: wrap;">
-            <button type="submit" class="btn btn-primary" style="flex: 1;">로그인</button>
-            <button type="button" class="btn" onclick="closeModal()">취소</button>
-        </div>
-        <div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid #e2e8f0; display: flex; gap: 8px; justify-content: center;">
-            <button type="button" class="btn btn-sm" onclick="showRegisterModal()">관리자 등록</button>
-            <button type="button" class="btn btn-sm" onclick="showChangePasswordModal()">비밀번호 변경</button>
-        </div>
-    `;
-
-    form.onsubmit = async (e) => {
-        e.preventDefault();
-        const submitBtn = form.querySelector('button[type="submit"]');
-        if (submitBtn) {
-            submitBtn.disabled = true;
-            submitBtn.innerText = '로그인 중...';
-        }
-
-        const id = document.getElementById('loginId').value;
-        const pw = document.getElementById('loginPw').value;
-
-        try {
-            if (!id) throw new Error('관리자를 선택해주세요.');
-
-            const result = await dataManager.login(id, pw);
-            if (result.success) {
-                document.getElementById('adminModeToggle').checked = true;
-                closeModal();
-                updateAdminState();
-                alert(`환영합니다, ${id}님 (${result.role})`);
-            } else {
-                alert(result.message || '로그인 실패');
-                if (submitBtn) {
-                    submitBtn.disabled = false;
-                    submitBtn.innerText = '로그인';
-                }
-            }
-        } catch (err) {
-            alert(err.message || '로그인 처리 중 오류 발생');
-            if (submitBtn) {
-                submitBtn.disabled = false;
-                submitBtn.innerText = '로그인';
-            }
-        }
-    };
+    // Legacy dynamic modal code removed.
+    // Use the static modal defined in index.html which uses the correct submitLogin()
+    closeAuthModals();
+    const modal = document.getElementById('loginModal');
+    if (modal) {
+        modal.style.display = 'block';
+        // Reset form if needed
+        document.getElementById('loginForm').reset();
+    } else {
+        console.error('Login modal not found!');
+    }
 };
 
 window.showRegisterModal = () => {
@@ -2323,13 +2394,14 @@ window.showChangePasswordModal = () => {
 };
 
 window.renderAdminManage = async () => {
+    // 🔥 새로운 유저 신청이 실시간으로 보이도록 시트에서 최신 데이터를 다시 불러옵니다.
+    await dataManager.init();
+
     const container = document.getElementById('adminListContainer');
     if (!container) return;
 
-    container.innerHTML = '<p style="padding: 1rem; text-align: center;">데이터 로딩 중...</p>';
-
-    // Force refresh data
-    await dataManager.init();
+    // Remove redundant init() to keep local optimistic updates
+    // await dataManager.init(); 
 
     // Update Admin State again just in case rights changed
     updateAdminState();
@@ -2347,17 +2419,32 @@ window.renderAdminManage = async () => {
             `<select onchange="changeAdminRole('${user.id}', this.value)" style="padding: 4px 8px; border-radius: 4px; border: 1px solid #cbd5e1; background: white; font-size: 0.9rem;">
                 <option value="master" ${user.status === 'master' ? 'selected' : ''}>Master</option>
                 <option value="manager" ${user.status === 'manager' ? 'selected' : ''}>Manager</option>
+                <option value="teacher" ${user.status === 'teacher' ? 'selected' : ''}>Teacher</option>
              </select>`;
 
         return `
         <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px; border-bottom: 1px solid #f1f5f9; background: white;">
-            <div style="display: flex; align-items: center; gap: 10px;">
-                <span style="font-weight: 600; font-size: 1.05rem;">${user.id}</span> 
-                ${roleSelect}
+            <div style="display: flex; align-items: center; gap: 20px; flex: 1;">
+                <div style="min-width: 80px;">
+                    <span style="font-size: 0.8rem; color: #94a3b8; display: block;">학반/ID</span>
+                    <span style="font-weight: 700; color: #1e293b;">${user.id}</span>
+                </div>
+                <div style="min-width: 100px;">
+                    <span style="font-size: 0.8rem; color: #94a3b8; display: block;">이름</span>
+                    <span style="color: #475569;">${user.name || '-'}</span>
+                </div>
+                <div style="min-width: 60px;">
+                    <span style="font-size: 0.8rem; color: #94a3b8; display: block;">비번</span>
+                    <span style="color: #6366f1; font-family: monospace; font-weight: bold;">${user.password || '****'}</span>
+                </div>
+                <div style="min-width: 100px;">
+                    <span style="font-size: 0.8rem; color: #94a3b8; display: block;">권한</span>
+                    ${roleSelect}
+                </div>
             </div>
-            <div>
+            <div style="display: flex; gap: 8px;">
                 ${isPending ? `<button class="btn btn-sm btn-primary" onclick="confirmAdminAction('${user.id}', 'approve')">승인</button>` : ''}
-                ${user.status !== 'master' || (user.status === 'master' && dataManager.currentUser.id !== user.id) ? `<button class="btn btn-sm btn-danger" onclick="confirmAdminAction('${user.id}', 'delete')">삭제</button>` : ''}
+                ${user.status !== 'master' || (user.status === 'master' && dataManager.currentUser.id !== user.id) ? `<button class="btn btn-sm btn-danger" style="background: #fee2e2; color: #ef4444;" onclick="confirmAdminAction('${user.id}', 'delete')">삭제</button>` : ''}
             </div>
         </div>
         `;
@@ -2369,11 +2456,12 @@ window.renderAdminManage = async () => {
 window.confirmAdminAction = async (targetId, action) => {
     if (!confirm(`${targetId} 사용자에 대해 '${action}' 작업을 수행하시겠습니까?`)) return;
 
-    await dataManager.sync('adminAction', { targetId, act: action });
-    await dataManager.init();
-
-    // Refresh Tab Panel instead of Modal
+    // Direct local update via sync internal method for instant feedback
+    dataManager.applyLocalUpdate('adminAction', { targetId, act: action });
     renderAdminManage();
+
+    // Await sync in the background
+    await dataManager.sync('adminAction', { targetId, act: action });
 };
 
 window.changeAdminRole = async (targetId, newRole) => {
@@ -2382,9 +2470,10 @@ window.changeAdminRole = async (targetId, newRole) => {
         return;
     }
 
-    await dataManager.sync('adminAction', { targetId, act: 'update_role', data: { role: newRole } });
-    await dataManager.init();
+    dataManager.applyLocalUpdate('adminAction', { targetId, act: 'update_role', data: { role: newRole } });
     renderAdminManage();
+
+    await dataManager.sync('adminAction', { targetId, act: 'update_role', data: { role: newRole } });
 };
 
 /* =========================================
@@ -2422,102 +2511,96 @@ window.switchDashboardFacility = (loc, btn) => {
 };
 
 window.renderDashboardWeekly = () => {
-    const container = document.getElementById('dashboardWeeklyGrid');
-    const rangeDisplay = document.getElementById('dashboardWeekRange');
+    try {
+        const container = document.getElementById('dashboardWeeklyGrid');
+        const rangeDisplay = document.getElementById('dashboardWeekRange');
 
-    if (!container) return;
+        if (!container) return;
 
-    // Calculate dates for Mon-Fri
-    const weekDates = [];
-    for (let i = 0; i < 5; i++) {
-        const d = new Date(dashboardWeekStart);
-        d.setDate(d.getDate() + i);
-        weekDates.push(d);
-    }
+        // Calculate dates for Mon-Fri
+        const weekDates = [];
+        for (let i = 0; i < 5; i++) {
+            const d = new Date(dashboardWeekStart);
+            d.setDate(d.getDate() + i);
+            weekDates.push(d);
+        }
 
-    // Update Date Range Display
-    const startStr = `${weekDates[0].getMonth() + 1}월 ${weekDates[0].getDate()}일`;
-    const endStr = `${weekDates[4].getMonth() + 1}월 ${weekDates[4].getDate()}일`;
-    if (rangeDisplay) rangeDisplay.innerText = `${startStr} ~ ${endStr}`;
+        // Update Date Range Display
+        const startStr = `${weekDates[0].getMonth() + 1}월 ${weekDates[0].getDate()}일`;
+        const endStr = `${weekDates[4].getMonth() + 1}월 ${weekDates[4].getDate()}일`;
+        if (rangeDisplay) rangeDisplay.innerText = `${startStr} ~ ${endStr}`;
 
-    // Render Table
-    let html = '<table class="timetable" style="min-width: 600px;">';
+        // Render Table
+        let html = '<table class="timetable" style="min-width: 600px;">';
 
-    // Header
-    const days = ['월요일', '화요일', '수요일', '목요일', '금요일'];
-    html += '<thead><tr><th style="width: 80px; background: #f8fafc;">교시</th>';
-    weekDates.forEach((date, i) => {
-        const isToday = new Date().toDateString() === date.toDateString();
-        const style = isToday ? 'background: #eff6ff; color: #1d4ed8;' : '';
-        html += `<th style="${style}">${days[i]}<br><span style="font-size:0.8em; font-weight:400;">(${date.getMonth() + 1}/${date.getDate()})</span></th>`;
-    });
-    html += '</tr></thead><tbody>';
-
-    const periods = ['1교시', '2교시', '3교시', '4교시', '점심시간', '5교시', '6교시'];
-
-    periods.forEach(period => {
-        html += `<tr><td class="time-cell">${period}</td>`;
-
+        // Header
+        const days = ['월요일', '화요일', '수요일', '목요일', '금요일'];
+        html += '<thead><tr><th style="width: 80px; background: #f8fafc;">교시</th>';
         weekDates.forEach((date, i) => {
-            const dateStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-            const dayName = days[i];
-
-            // 1. Get Base Schedule
-            const base = dataManager.baseSchedule.find(s =>
-                s.day === dayName && s.period === period && s.location === dashboardFacility
-            );
-            const baseClass = base ? base.class : '';
-
-            // 2. Get Special Requests (Approved or Pending)
-            const specials = dataManager.weeklySchedule.filter(s => {
-                if (!s.date) return false;
-                let recordDate = s.date;
-                // Handle ISO string from Sheets (which comes as UTC or ISO)
-                if (typeof s.date === 'string' && s.date.includes('T')) {
-                    const d = new Date(s.date);
-                    const year = d.getFullYear();
-                    const month = String(d.getMonth() + 1).padStart(2, '0');
-                    const day = String(d.getDate()).padStart(2, '0');
-                    recordDate = `${year}-${month}-${day}`;
-                }
-                return recordDate === dateStr && s.period === period && s.location === dashboardFacility;
-            });
-
-            // Logic: 
-            // - If Approved exists, it OVERRIDES Base.
-            // - Conflict Logic: If MULTIPLE approved exist, show ALL.
-            // - If Pending exists, it shows BELOW Base (or alone).
-
-            const approvedList = specials.filter(s => s.status === '승인');
-            const pendings = specials.filter(s => s.status === '대기');
-
-            let cellContent = '';
-
-            if (approvedList.length > 0) {
-                // Approved overrides everything
-                const classes = approvedList.map(a => a.class).join(', ');
-                cellContent = `<span class="cell-special-approved">${classes}</span>`;
-            } else {
-                // Show Base
-                if (baseClass) {
-                    cellContent += `<span style="color: #64748b;">${baseClass}</span>`;
-                }
-
-                // Append Pending beneath
-                if (pendings.length > 0) {
-                    pendings.forEach(p => {
-                        cellContent += `<span class="cell-special-pending">대기: ${p.class}</span>`;
-                    });
-                }
-            }
-
-            html += `<td class="dash-td" onclick="showBookingModal('${dateStr}', '${period}', '${dashboardFacility}')" style="cursor: pointer;"><div class="dash-cell-scroll">${cellContent || '-'}</div></td>`;
+            const isToday = new Date().toDateString() === date.toDateString();
+            const style = isToday ? 'background: #eff6ff; color: #1d4ed8;' : '';
+            html += `<th style="${style}">${days[i]}<br><span style="font-size:0.8em; font-weight:400;">(${date.getMonth() + 1}/${date.getDate()})</span></th>`;
         });
-        html += '</tr>';
-    });
+        html += '</tr></thead><tbody>';
 
-    html += '</tbody></table>';
-    container.innerHTML = html;
+        const periods = ['1교시', '2교시', '3교시', '4교시', '점심시간', '5교시', '6교시'];
+
+        periods.forEach(period => {
+            html += `<tr><td class="time-cell">${period}</td>`;
+
+            weekDates.forEach((date, i) => {
+                const dateStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+                const dayName = days[i];
+
+                // 1. Get Base Schedule
+                const base = (dataManager.baseSchedule || []).find(s =>
+                    s.day === dayName && s.period === period && s.location === dashboardFacility
+                );
+                const baseClass = base ? base.class : '';
+
+                // 2. Get Special Requests (Approved or Pending)
+                const specials = (dataManager.weeklySchedule || []).filter(s => {
+                    if (!s.date) return false;
+                    let recordDate = s.date;
+                    if (typeof s.date === 'string' && s.date.includes('T')) {
+                        const d = new Date(s.date);
+                        const year = d.getFullYear();
+                        const month = String(d.getMonth() + 1).padStart(2, '0');
+                        const day = String(d.getDate()).padStart(2, '0');
+                        recordDate = `${year}-${month}-${day}`;
+                    }
+                    return recordDate === dateStr && s.period === period && s.location === dashboardFacility;
+                });
+
+                const approvedList = specials.filter(s => s.status === '승인');
+                const pendings = specials.filter(s => s.status === '대기');
+
+                let cellContent = '';
+
+                if (approvedList.length > 0) {
+                    const classes = approvedList.map(a => a.class).join(', ');
+                    cellContent = `<span class="cell-special-approved">${classes}</span>`;
+                } else {
+                    if (baseClass) {
+                        cellContent += `<span style="color: #64748b;">${baseClass}</span>`;
+                    }
+                    if (pendings.length > 0) {
+                        pendings.forEach(p => {
+                            cellContent += `<span class="cell-special-pending">대기: ${p.class}</span>`;
+                        });
+                    }
+                }
+
+                html += `<td class="dash-td" onclick="showBookingModal('${dateStr}', '${period}', '${dashboardFacility}')" style="cursor: pointer;"><div class="dash-cell-scroll">${cellContent || '-'}</div></td>`;
+            });
+            html += '</tr>';
+        });
+
+        html += '</tbody></table>';
+        container.innerHTML = html;
+    } catch (e) {
+        console.error('renderDashboardWeekly failed:', e);
+    }
 };
 
 // --- Dashboard Interactions ---
@@ -2982,7 +3065,7 @@ window.renderBulkCart = () => {
             `;
             tbody.appendChild(row);
         });
-        lucide.createIcons();
+        if (window.lucide) lucide.createIcons();
     }
 };
 
@@ -3062,7 +3145,7 @@ window.submitBulkRental = async () => {
         try {
             renderRecentActivity(); // Refresh logs first
             initInventory(); // Refresh main table
-            renderDashboardStats(); // Refresh stats
+            if (typeof updateDashboardStats === 'function') updateDashboardStats();
         } catch (uiErr) {
             console.warn('UI Refresh failed after rental', uiErr);
         }
@@ -3325,7 +3408,7 @@ window.renderBulkReturnCart = () => {
             `;
             tbody.appendChild(row);
         });
-        lucide.createIcons();
+        if (window.lucide) lucide.createIcons();
     }
 };
 
@@ -3391,9 +3474,9 @@ window.submitBulkReturn = async () => {
         try {
             renderRecentActivity();
             initInventory();
-            renderDashboardStats();
+            if (typeof updateDashboardStats === 'function') updateDashboardStats();
         } catch (uiErr) {
-            console.warn('UI Refresh failed after return', uiErr);
+            console.warn('UI Refresh failed after action', uiErr);
         }
 
         if (failCount > 0) {
@@ -3408,5 +3491,181 @@ window.submitBulkReturn = async () => {
     } finally {
         btn.disabled = false;
         btn.innerText = originalText;
+    }
+};
+
+window.showRegisterModal = () => {
+    closeAuthModals();
+    document.getElementById('registerModal').style.display = 'block';
+};
+
+// ✅ Explicit State Transition Function
+window.enterAppMode = () => {
+    console.log('[DEBUG] enterAppMode called');
+
+    // 1. DOM State Switch
+    document.body.classList.remove('auth-mode');
+    document.body.classList.add('app-mode');
+
+    const authSec = document.getElementById('authSection');
+    const mainSec = document.getElementById('mainAppSection');
+
+    if (authSec) authSec.style.display = 'none';
+    if (mainSec) mainSec.style.display = 'flex'; // Ensure Flexbox layout
+
+    // 2. Data & UI Initialization
+    updateView(); // Updates user info in header, etc.
+
+    // Initialize specific components if they haven't been loaded
+    if (typeof updateDashboardStats === 'function') updateDashboardStats();
+    if (typeof renderRecentActivity === 'function') renderRecentActivity();
+    if (typeof updateAdminState === 'function') updateAdminState();
+
+    console.log('[DEBUG] enterAppMode completed');
+};
+
+// ✅ Explicit Login Result Modal Helper
+window.showLoginResultModal = (isSuccess, message) => {
+    const modal = document.getElementById('loginResultModal');
+    const icon = document.getElementById('loginResultIcon');
+    const title = document.getElementById('loginResultTitle');
+    const msg = document.getElementById('loginResultMessage');
+    const btn = document.getElementById('loginResultBtn');
+
+    if (!modal || !icon || !title || !msg || !btn) return;
+
+    if (isSuccess) {
+        icon.setAttribute('data-lucide', 'check-circle');
+        icon.style.color = 'var(--primary)';
+        title.innerText = '로그인 성공';
+        btn.onclick = () => {
+            modal.style.display = 'none';
+            enterAppMode(); // Trigger transition only after user confirmation
+        };
+    } else {
+        icon.setAttribute('data-lucide', 'x-circle');
+        icon.style.color = 'var(--danger)';
+        title.innerText = '로그인 실패';
+        btn.onclick = () => {
+            modal.style.display = 'none';
+        };
+    }
+
+    msg.innerText = message;
+    lucide.createIcons(); // Refresh icon
+    modal.style.display = 'block';
+};
+
+window.submitLogin = async () => {
+    console.log('[DEBUG] submitLogin called');
+    const id = document.getElementById('loginUserSelect').value;
+    const pw = document.getElementById('loginPassword').value;
+
+    if (!id || !pw) return alert('아이디와 비밀번호를 모두 입력해주세요.');
+
+    try {
+        const res = await dataManager.login(id, pw);
+
+        if (res.success) {
+            console.log('[DEBUG] Login successful');
+
+            // 1. Close Modal immediately
+            closeAuthModals();
+
+            // 2. Force Data Loaded State
+            dataManager.isLoaded = true;
+
+            // 3. Show Success Modal instead of auto-transition
+            // enterAppMode(); <-- Commented out for Modal flow
+
+            /* Old Alert Logic Commented Out
+            setTimeout(() => {
+                if (typeof showConnectionStatus === 'function') {
+                    showConnectionStatus(true, `환영합니다, ${res.name || id} 선생님!`);
+                }
+            }, 500);
+            */
+
+            showLoginResultModal(true, `환영합니다, ${res.name || id} 선생님!`);
+
+        } else {
+            console.warn('[DEBUG] Login failed:', res.message);
+            // alert(res.message || '로그인 실패'); <-- Old Alert Commented Out
+            showLoginResultModal(false, res.message || '로그인 실패');
+        }
+    } catch (e) {
+        console.error('[CRITICAL] Login Error:', e);
+        // alert('로그인 처리 중 오류가 발생했습니다.'); <-- Old Alert Commented Out
+        showLoginResultModal(false, '로그인 처리 중 오류가 발생했습니다.');
+    }
+};
+
+window.submitRegister = async () => {
+    const id = document.getElementById('regId').value;
+    const name = document.getElementById('regName').value;
+    const pw = document.getElementById('regPassword').value;
+    const cpw = document.getElementById('regConfirmPassword').value;
+
+    if (!id || !pw || !cpw) return alert('필수 항목을 모두 입력해주세요.');
+    if (pw !== cpw) return alert('비밀번호가 일치하지 않습니다.');
+    if (!/^\d{4}$/.test(pw)) return alert('비밀번호는 숫자 4자리여야 합니다.');
+
+    const res = await dataManager.register({ id, name, password: pw });
+    if (res.success) {
+        // alert('회원 신청이 완료되었습니다. 관리자 승인 후 이용 가능합니다.');
+        showLoginResultModal(true, '회원 신청이 완료되었습니다. 승인 대기중.');
+        closeAuthModals();
+        showLoginModal();
+    } else {
+        // alert(res.message || '회원 신청 중 오류가 발생했습니다.');
+        showLoginResultModal(false, res.message || '회원 신청 오류');
+    }
+};
+
+window.handleLogout = () => {
+    if (confirm('로그아웃 하시겠습니까?')) {
+        dataManager.logout();
+        updateView();
+        location.reload(); // Reset everything
+    }
+};
+
+window.showProfileEditModal = () => {
+    const user = dataManager.currentUser;
+    if (!user) return;
+
+    document.getElementById('editId').value = user.id;
+    document.getElementById('editName').value = user.name || '';
+    document.getElementById('editPassword').value = '';
+    document.getElementById('profileEditModal').style.display = 'block';
+};
+
+window.submitProfileEdit = async () => {
+    const name = document.getElementById('editName').value;
+    const pw = document.getElementById('editPassword').value;
+
+    if (pw && !/^\d{4}$/.test(pw)) return alert('비밀번호는 숫자 4자리여야 합니다.');
+
+    const payload = {
+        name,
+        password: pw || undefined // Only send if changed
+    };
+
+    try {
+        await dataManager.sync('updateProfile', { id: dataManager.currentUser.id, data: payload });
+        // alert('정보가 수정되었습니다. 다음 로그인 때 반영될 수 있습니다.');
+        showLoginResultModal(true, '정보가 수정되었습니다.');
+        closeAuthModals();
+
+        // Update local session
+        dataManager.currentUser.name = name;
+        if (typeof STORAGE_KEYS !== 'undefined') {
+            localStorage.setItem(STORAGE_KEYS.USER_SESSION, JSON.stringify(dataManager.currentUser));
+        } else {
+            localStorage.setItem('gs_user_session', JSON.stringify(dataManager.currentUser));
+        }
+    } catch (err) {
+        // alert('수정 중 오류가 발생했습니다.');
+        showLoginResultModal(false, '수정 중 오류가 발생했습니다.');
     }
 };

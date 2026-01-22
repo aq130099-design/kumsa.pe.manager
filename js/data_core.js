@@ -7,13 +7,13 @@ const API_URL = "https://script.google.com/macros/s/AKfycbzF-YU-_3O9x1_0T_Yohyyf
 const STORAGE_KEYS = {
     BASE_SCHEDULE: 'gs_base_schedule',
     WEEKLY_SCHEDULE: 'gs_weekly_schedule',
-    WEEKLY_SCHEDULE: 'gs_weekly_schedule',
     INVENTORY: 'gs_inventory',
     RENTALS: 'gs_rentals',
     ADMIN_REQUESTS: 'gs_admin_requests',
     LOCATIONS: 'gs_locations',
     ACTIVITY_LOGS: 'gs_activity_logs',
-    GREETING: 'gs_greeting'
+    GREETING: 'gs_greeting',
+    USER_SESSION: 'gs_user_session'
 };
 
 const defaultLocations = [
@@ -41,7 +41,31 @@ class DataManager {
         this.isLoaded = false;
         this.isCloudConnected = false;
         this.admins = [];
-        this.currentUser = null;
+        // Initialize with basic validation (Lenient)
+        const savedSession = localStorage.getItem(STORAGE_KEYS.USER_SESSION);
+        console.log("[DataManager] Current Session Check:", savedSession);
+
+        if (savedSession && savedSession !== 'null' && savedSession !== 'undefined') {
+            try {
+                const parsed = JSON.parse(savedSession);
+                // Be lenient: as long as there is an ID, keep the session
+                if (parsed && typeof parsed === 'object' && parsed.id) {
+                    this.currentUser = parsed;
+                    console.log("[DataManager] Session restored for:", this.currentUser.id);
+                } else {
+                    console.warn("[DataManager] Malformed session removed");
+                    localStorage.removeItem(STORAGE_KEYS.USER_SESSION);
+                    this.currentUser = null;
+                }
+            } catch (e) {
+                console.error("[DataManager] Session load error:", e);
+                localStorage.removeItem(STORAGE_KEYS.USER_SESSION);
+                this.currentUser = null;
+            }
+        } else {
+            this.currentUser = null;
+        }
+
         this.greeting = '';
     }
 
@@ -116,6 +140,22 @@ class DataManager {
 
             this.admins = data.admins || [];
 
+            // Healing for Admins (Fix Class auto-date issue)
+            this.admins.forEach(admin => {
+                const dateRegex = /^\d{4}-\d{2}-\d{2}T/;
+
+                // If ID is coming in as a date string (e.g., 2026-03-01T...)
+                if (admin.id && typeof admin.id === 'string' && dateRegex.test(admin.id)) {
+                    const d = new Date(admin.id);
+                    if (!isNaN(d.getTime())) {
+                        const m = d.getMonth() + 1;
+                        const day = d.getDate();
+                        // Recover "3-1" from the date object
+                        admin.id = `${m}-${day}`;
+                    }
+                }
+            });
+
             // Healing for Purchase Requests
             this.adminRequests = (data.adminRequests || []).map(r => {
                 const dateRegex = /^\d{4}-\d{2}-\d{2}T/;
@@ -130,6 +170,36 @@ class DataManager {
                     } catch (e) { }
                 }
                 return r;
+            });
+
+            this.baseSchedule = (data.baseSchedule || []).map(s => {
+                const dateRegex = /^\d{4}-\d{2}-\d{2}T/;
+                if (s.class && typeof s.class === 'string' && dateRegex.test(s.class)) {
+                    try {
+                        const d = new Date(s.class);
+                        if (!isNaN(d.getTime())) {
+                            const month = d.getMonth() + 1;
+                            const day = d.getDate();
+                            s.class = `${month}-${day}`;
+                        }
+                    } catch (e) { }
+                }
+                return s;
+            });
+
+            this.weeklySchedule = (data.weeklySchedule || []).map(s => {
+                const dateRegex = /^\d{4}-\d{2}-\d{2}T/;
+                if (s.class && typeof s.class === 'string' && dateRegex.test(s.class)) {
+                    try {
+                        const d = new Date(s.class);
+                        if (!isNaN(d.getTime())) {
+                            const month = d.getMonth() + 1;
+                            const day = d.getDate();
+                            s.class = `${month}-${day}`;
+                        }
+                    } catch (e) { }
+                }
+                return s;
             });
 
             this.locations = data.locations || defaultLocations;
@@ -164,7 +234,13 @@ class DataManager {
             }, 8000); // 8s timeout for login
             const result = await response.json();
             if (result.success) {
-                this.currentUser = { id, role: result.role };
+                this.currentUser = {
+                    id,
+                    role: result.role,
+                    name: result.name,
+                    class: result.class
+                };
+                localStorage.setItem(STORAGE_KEYS.USER_SESSION, JSON.stringify(this.currentUser));
             }
             return result;
         } catch (e) {
@@ -173,8 +249,22 @@ class DataManager {
         }
     }
 
+    async register(data) {
+        try {
+            const response = await this.fetchWithTimeout(API_URL, {
+                method: 'POST',
+                body: JSON.stringify({ action: 'register', ...data })
+            }, 8000);
+            return await response.json();
+        } catch (e) {
+            console.error(e);
+            return { success: false, message: "등록 실패: 서버 오류" };
+        }
+    }
+
     logout() {
         this.currentUser = null;
+        localStorage.removeItem(STORAGE_KEYS.USER_SESSION);
     }
 
     // New: Generic Fetch for getting data (Weather, AI, etc.)
@@ -215,15 +305,30 @@ class DataManager {
             // Using fetchWithTimeout but logic here is 'no-cors' for GAS simple triggers sometimes, 
             // but we use 'POST' with body.
 
-            await this.fetchWithTimeout(API_URL, {
+            console.log(`[DEBUG] Syncing action: ${action}`, payload);
+            const syncResponse = await this.fetchWithTimeout(API_URL, {
                 method: 'POST',
-                mode: 'no-cors',
+                // mode: 'no-cors' // Removing to see actual server errors
                 body: JSON.stringify({ action, ...payload })
             }, 10000);
 
-            console.log(`Synced action: ${action}`);
+            if (!syncResponse.ok) {
+                throw new Error(`HTTP error! status: ${syncResponse.status}`);
+            }
+
+            const responseText = await syncResponse.text();
+            console.log(`[DEBUG] Sync response for ${action}:`, responseText);
+
+            try {
+                const resJson = JSON.parse(responseText);
+                if (resJson.success === false) {
+                    throw new Error(resJson.message || "Server action failed");
+                }
+            } catch (e) {
+                // Not JSON or parse failed, but we ignore if it's not success:false
+            }
         } catch (error) {
-            console.error(`Sync failed for ${action}:`, error);
+            console.error(`[CRITICAL] Sync failed for ${action}:`, error);
         }
     }
 
@@ -354,6 +459,23 @@ class DataManager {
             this.activityLogs = [{ timestamp: date, message: payload.message }, ...this.activityLogs].slice(0, 20);
         } else if (action === 'updateGreeting') {
             this.greeting = payload.text;
+        } else if (action === 'adminAction') {
+            const { targetId, act, data } = payload;
+            console.log(`[DEBUG] applyLocalUpdate adminAction:`, targetId, act);
+            const admin = this.admins.find(a => String(a.id) === String(targetId));
+            if (admin) {
+                console.log(`[DEBUG] Found admin for update:`, admin.id);
+                if (act === 'approve') {
+                    admin.status = 'teacher';
+                } else if (act === 'delete') {
+                    this.admins = this.admins.filter(a => a.id != targetId);
+                } else if (act === 'update_role') {
+                    admin.status = data.role;
+                }
+            } else {
+                console.warn(`[DEBUG] Admin NOT found for targetId:`, targetId);
+                console.log(`[DEBUG] Current admins IDs:`, this.admins.map(a => a.id));
+            }
         }
         // Save to local as backup
         this.saveLocalAll();
