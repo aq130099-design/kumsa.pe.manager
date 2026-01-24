@@ -442,7 +442,19 @@ h1 {
 .weather-icon img {
     width: 42px;
     height: 42px;
-    filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.1));
+    /* General improvement */
+    filter: drop-shadow(0 2px 8px rgba(255, 255, 255, 0.6)) saturate(1.2);
+}
+
+/* Specific fix for Night Mode visibility */
+.weather-widget.night .weather-icon img {
+    filter: drop-shadow(0 0 10px rgba(255, 255, 255, 0.8)) brightness(2) contrast(1.2);
+}
+
+/* Ensure SVG icons (fallback) are white */
+.weather-widget.night .weather-icon svg {
+    stroke: #ffffff;
+    filter: drop-shadow(0 0 5px rgba(255, 255, 255, 0.8));
 }
 
 .weather-temp {

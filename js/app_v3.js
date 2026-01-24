@@ -345,6 +345,21 @@ async function fetchWeatherData() {
         tempEl.innerText = '!';
         if (dust10) dust10.innerText = '!';
         if (dust25) dust25.innerText = '!';
+
+        // Fallback: Check Night Mode even on error
+        const nowHour = new Date().getHours();
+        const isNight = nowHour >= 19 || nowHour < 6;
+        if (isNight) {
+            // Use Moon Icon (Lucide or consistent with success path which handles widget class)
+            if (widget) {
+                widget.className = 'weather-widget night';
+            }
+            // Use a default moon image or Lucide icon. 
+            // Since success path uses OpenWeatherMap image, we can try using a static image or just Lucide for error safety.
+            // Using Lucide 'moon' as it's built-in and guaranteed to work if network fails.
+            iconEl.innerHTML = '<i data-lucide="moon"></i>';
+            if (window.lucide) window.lucide.createIcons();
+        }
     }
 }
 
@@ -480,7 +495,9 @@ async function submitAIRecommend() {
 
         // Check for errors from GAS or Gemini
         if (data.error) {
-            throw new Error(data.error.message || 'AI 호출 중 오류가 발생했습니다.');
+            const msg = data.error.message || 'AI 호출 중 오류가 발생했습니다.';
+            const detail = data.error.detail ? ` (${data.error.detail})` : '';
+            throw new Error(msg + detail);
         }
 
         // GAS returns the raw text response in the body content (as per our GAS code)
@@ -594,6 +611,46 @@ function renderRecentActivity() {
         li.innerHTML = `<span>${log.message}</span> <span style="color:#94a3b8; font-size: 0.75rem; white-space: nowrap;">${timeStr}</span>`;
         list.appendChild(li);
     });
+}
+
+// 4. Update Teacher Dashboard Stats (New)
+function updateTeacherDashboardStats() {
+    if (isAdminMode() || !dataManager.currentUser) return;
+
+    try {
+        // 1. Pending Approvals I need to process
+        const pendingCount = (dataManager.weeklySchedule || [])
+            .filter(s => s.status === '대기')
+            .filter(s => canApproveBooking(s))
+            .length;
+
+        const teacherPendingEl = document.getElementById('teacherPendingApprovals');
+        if (teacherPendingEl) teacherPendingEl.innerText = `${pendingCount}건`;
+
+        // 2. My Reservations Count (Pending or Approved)
+        const myId = dataManager.currentUser.id; // Class name
+        const myReservationsCount = (dataManager.weeklySchedule || [])
+            .filter(s => s.class === myId && (s.status === '대기' || s.status === '승인' || s.status === '승인됨'))
+            .length;
+
+        const myReservationsEl = document.getElementById('teacherMyReservations');
+        if (myReservationsEl) myReservationsEl.innerText = `${myReservationsCount}건`;
+
+        // 3. My Unreturned Items Count (New)
+        let unreturnedCount = 0;
+        if (dataManager.inventory) {
+            unreturnedCount = dataManager.inventory.reduce((sum, item) => {
+                const myRentals = (item.rentals || []).filter(r => r.class === myId && !r.returned);
+                return sum + myRentals.length;
+            }, 0);
+        }
+
+        const unreturnedEl = document.getElementById('teacherUnreturnedItems');
+        if (unreturnedEl) unreturnedEl.innerText = `${unreturnedCount}개`;
+
+    } catch (e) {
+        console.warn('Teacher dashboard stats refresh failed:', e);
+    }
 }
 
 function updateDashboardStats() {
@@ -828,10 +885,12 @@ function createBookingCard(booking, isSpecial) {
 }
 
 // Help Check if user can approve this booking (Admin or Owner of Base Slot)
+// Approval Permission Check - Extended for Teachers
 function canApproveBooking(booking) {
     if (isAdminMode()) return true;
     if (!dataManager.currentUser) return false;
 
+    // 1. Check Base Schedule Ownership
     // Special bookings always have a date
     if (!booking.date) return false;
 
@@ -840,17 +899,37 @@ function canApproveBooking(booking) {
     const days = ['일요일', '월요일', '화요일', '수요일', '목요일', '금요일', '토요일'];
     const dayOfWeek = days[date.getDay()];
 
-    // Find owners in base schedule
     const ownerSlot = dataManager.baseSchedule.find(b =>
         b.day === dayOfWeek &&
         b.period === booking.period &&
         b.location === booking.location
     );
 
-    if (!ownerSlot) return false;
+    // If I own the base slot
+    if (ownerSlot && String(ownerSlot.class) === String(dataManager.currentUser.class)) {
+        return true;
+    }
 
-    // Check match
-    return String(ownerSlot.class) === String(dataManager.currentUser.class);
+    // 2. Check Approved Special Booking Ownership
+    // If there is an APPROVED booking for this slot (conflicting with my request if I were requesting, but here I am checking if I can approve someone else's request?)
+    // Wait, the logic is: If *I* have an APPROVED booking here, efficiently "owning" the slot for this specific day, can I approve/reject others?
+    // Scenario: I booked Gym for Friday 1st period. Admin approved it.
+    // Someone else requests Gym for Friday 1st period.
+    // The system should probably flag this as a conflict, but if it allows the request to go to 'pending',
+    // I should be able to see it and say "No" (or "Yes" if I yield).
+
+    const approvedBookingOwner = dataManager.weeklySchedule.find(s =>
+        s.date === booking.date &&
+        s.period === booking.period &&
+        s.location === booking.location &&
+        s.status === '승인됨'
+    );
+
+    if (approvedBookingOwner && String(approvedBookingOwner.class) === String(dataManager.currentUser.class)) {
+        return true;
+    }
+
+    return false;
 }
 
 function showDetailModal(booking, isSpecial) {
@@ -921,7 +1000,9 @@ window.cancelBooking = async (id) => {
     closeModal();
     renderTimetable();
     renderDashboardWeekly(); // Refresh Dashboard Schedule
+    renderDashboardWeekly(); // Refresh Dashboard Schedule
     updateDashboardStats();
+    updateTeacherDashboardStats();
     alert('예약이 취소되었습니다.');
 };
 
@@ -938,7 +1019,9 @@ async function executeApproval(booking) {
     closeModal();
     renderTimetable();
     renderDashboardWeekly(); // Refresh Dashboard Schedule
+    renderDashboardWeekly(); // Refresh Dashboard Schedule
     updateDashboardStats();
+    updateTeacherDashboardStats();
     alert('승인되었습니다.');
 }
 
@@ -1030,7 +1113,10 @@ window.confirmDeleteAction = async (id) => {
     `;
     if (window.lucide) lucide.createIcons();
     renderTimetable();
+    renderDashboardWeekly(); // Fix: Immediate update for dashboard
+    renderDashboardWeekly(); // Fix: Immediate update for dashboard
     updateDashboardStats();
+    updateTeacherDashboardStats();
 };
 
 window.showDetailModalById = (id) => {
@@ -1067,8 +1153,10 @@ function showBookingModal(date, period, location) {
                 </select>
             </div>
             <div class="form-group">
-                <label>내용 (예: 1-1, 1학년 전체 등)</label>
-                <input type="text" id="targetClass" required>
+                <label>내용 (자동 입력: 학급명)</label>
+                 <div style="padding: 10px; background: #f1f5f9; border-radius: 8px; color: #64748b;">
+                    ${dataManager.currentUser ? dataManager.currentUser.id : '로그인 필요'}
+                </div>
             </div>
             <button type="submit" class="btn btn-primary">신청하기</button>
         `;
@@ -1076,8 +1164,10 @@ function showBookingModal(date, period, location) {
         document.getElementById('modalTitle').innerText = `${period} 예약 (${location})`;
         form.innerHTML = `
             <div class="form-group">
-                <label>신청 학급</label>
-                <input type="text" id="targetClass" placeholder="예: 5-2" required>
+                <label>신청 학급 (자동 입력)</label>
+                <div style="padding: 10px; background: #f1f5f9; border-radius: 8px; color: #64748b;">
+                    ${dataManager.currentUser ? dataManager.currentUser.id : '로그인 필요'}
+                </div>
             </div>
             <button type="submit" class="btn btn-primary">신청하기</button>
         `;
@@ -1089,7 +1179,14 @@ function showBookingModal(date, period, location) {
         if (submitBtn) submitBtn.disabled = true;
 
         try {
-            const targetClass = document.getElementById('targetClass').value;
+            // Auto-fill Class from User
+            if (!dataManager.currentUser) {
+                alert('로그인이 필요합니다.');
+                if (submitBtn) submitBtn.disabled = false;
+                return;
+            }
+            const targetClass = dataManager.currentUser.id; // User ID is the Class Name (e.g. "6-1")
+
             const newBooking = { date, period, location, class: targetClass };
 
             await dataManager.sync('addBooking', { data: newBooking });
@@ -1182,6 +1279,14 @@ function initInventory() {
             ? `<span class="badge" style="background: #eab308; color: white;">${repairingCount}개 수리중</span>`
             : `<span class="badge badge-done">정상</span>`;
 
+        // Check if user can return (Admin or has own rentals)
+        let canReturn = false;
+        if (isAdmin) {
+            canReturn = true;
+        } else if (dataManager.currentUser) {
+            canReturn = activeRentals.some(r => r.class === dataManager.currentUser.id || r.requester === dataManager.currentUser.id);
+        }
+
         // Rental info string (multiple classes)
         const rentalInfo = activeRentals.length > 0
             ? activeRentals.map(r => `<div class="rental-tag"><b>${r.class}</b>: ${r.count}개</div>`).join('')
@@ -1198,7 +1303,11 @@ function initInventory() {
                 <div style="display: flex; gap: 4px;">
                     <button class="btn btn-primary btn-sm" onclick="handleRental(${item.id})" ${available <= 0 ? 'disabled' : ''}>대여</button>
                     ${activeRentals.length > 0 ? `
-                    <button class="btn btn-sm" style="background: #f1f5f9;" onclick="showReturnListModal(${item.id})">반납</button>` : ''}
+                    <button class="btn btn-sm" style="background: #f1f5f9; ${!canReturn ? 'opacity: 0.5; cursor: not-allowed; color: #94a3b8;' : ''}" 
+                            onclick="${canReturn ? `showReturnListModal(${item.id})` : ''}"
+                            ${!canReturn ? 'disabled title="내 학급의 대여 내역이 없습니다"' : ''}>
+                        반납
+                    </button>` : ''}
                     ${isAdmin ? `
                     <button class="btn btn-sm" style="background: #e2e8f0;" onclick="showEditInventoryModal('${item.id}')">수정</button>
                     <button class="btn btn-danger btn-sm" onclick="confirmDeleteInventoryItem(${item.id})">삭제</button>` : ''}
@@ -1228,8 +1337,10 @@ function showRentalModal(item, available) {
 
     form.innerHTML = `
         <div class="form-group">
-            <label>대여 학급</label>
-            <input type="text" id="rentalClass" placeholder="예: 3-1" required>
+            <label>대여 학급 (자동 입력)</label>
+             <div style="padding: 10px; background: #f1f5f9; border-radius: 8px; color: #64748b;">
+                ${dataManager.currentUser ? dataManager.currentUser.id : '로그인 필요'}
+            </div>
         </div>
         <div class="form-group">
             <label>대여 수량 (최대 ${available}개)</label>
@@ -1243,7 +1354,12 @@ function showRentalModal(item, available) {
 
     form.onsubmit = async (e) => {
         e.preventDefault();
-        const targetClass = document.getElementById('rentalClass').value;
+
+        if (!dataManager.currentUser) {
+            alert('로그인이 필요합니다.');
+            return;
+        }
+        const targetClass = dataManager.currentUser.id; // Auto-fill
         const count = parseInt(document.getElementById('rentalCount').value);
 
         if (count > available) {
@@ -1282,17 +1398,31 @@ window.showReturnListModal = (id) => {
     const form = document.getElementById('modalForm');
     document.getElementById('modalTitle').innerText = `${item.name} 반납 선택`;
 
-    const activeRentals = item.rentals.filter(r => !r.returned);
+    let activeRentals = item.rentals.filter(r => !r.returned);
+
+    // Permission Check: If not admin, only show own rentals
+    if (!isAdminMode() && dataManager.currentUser) {
+        activeRentals = activeRentals.filter(r => (r.class === dataManager.currentUser.id || r.requester === dataManager.currentUser.id));
+    }
 
     let listHtml = '<div class="return-list">';
-    activeRentals.forEach(r => {
+
+    if (activeRentals.length === 0) {
         listHtml += `
-            <div class="return-item">
-                <span><b>${r.class}</b> (${r.count}개)</span>
-                <button type="button" class="btn btn-primary btn-sm" onclick="processReturn(${item.id}, ${r.id})">반납</button>
+            <div style="text-align:center; padding: 2rem; color: var(--text-muted);">
+                반납할 수 있는 내역이 없습니다.
             </div>
         `;
-    });
+    } else {
+        activeRentals.forEach(r => {
+            listHtml += `
+                <div class="return-item">
+                    <span><b>${r.class}</b> (${r.count}개)</span>
+                    <button type="button" class="btn btn-primary btn-sm" onclick="processReturn(${item.id}, ${r.id})">반납</button>
+                </div>
+            `;
+        });
+    }
     listHtml += '</div>';
 
     form.innerHTML = `
@@ -1607,8 +1737,10 @@ function showNewRepairModal() {
             <input type="text" id="repairMemo" required placeholder="예: 구멍 남, 바람 빠짐 등">
         </div>
         <div class="form-group">
-            <label>신청자 (학급/이름)</label>
-            <input type="text" id="repairRequester" required placeholder="예: 6-1 홍길동">
+            <label>신청자 (자동 입력)</label>
+             <div style="padding: 10px; background: #f1f5f9; border-radius: 8px; color: #64748b;">
+                ${dataManager.currentUser ? (dataManager.currentUser.id + (dataManager.currentUser.name ? ` (${dataManager.currentUser.name})` : '')) : '로그인 필요'}
+            </div>
         </div>
         <div class="modal-actions">
             <button type="submit" class="btn btn-primary">요청하기</button>
@@ -1692,7 +1824,7 @@ function showNewRepairModal() {
                 count: count,
                 date: new Date().toISOString().split('T')[0],
                 memo: document.getElementById('repairMemo').value,
-                requester: document.getElementById('repairRequester').value,
+                requester: dataManager.currentUser ? (dataManager.currentUser.id + (dataManager.currentUser.name ? ' ' + dataManager.currentUser.name : '')) : '익명',
                 status: '대기'
             };
 
@@ -1957,8 +2089,10 @@ function showNewRequestModal(defaultType) {
             <textarea id="newReqContent" placeholder="상세 내용을 입력하세요" required></textarea>
         </div>
         <div class="form-group">
-            <label>신청자</label>
-            <input type="text" id="newReqRequester" placeholder="이름" required>
+            <label>신청자 (자동 입력)</label>
+             <div style="padding: 10px; background: #f1f5f9; border-radius: 8px; color: #64748b;">
+                ${dataManager.currentUser ? (dataManager.currentUser.id + (dataManager.currentUser.name ? ` (${dataManager.currentUser.name})` : '')) : '로그인 필요'}
+            </div>
         </div>
         <div class="modal-actions">
             <button type="submit" class="btn btn-primary">신청하기</button>
@@ -1975,7 +2109,7 @@ function showNewRequestModal(defaultType) {
             const requestData = {
                 type: document.getElementById('newReqType').value,
                 content: document.getElementById('newReqContent').value,
-                requester: document.getElementById('newReqRequester').value
+                requester: dataManager.currentUser ? (dataManager.currentUser.id + (dataManager.currentUser.name ? ' ' + dataManager.currentUser.name : '')) : '익명'
             };
 
             await dataManager.sync('addRequest', { data: requestData });
@@ -2054,7 +2188,7 @@ function updateAdminState() {
     const isMaster = dataManager.currentUser && dataManager.currentUser.role === 'master';
     const isManager = dataManager.currentUser && dataManager.currentUser.role === 'manager';
 
-    console.log(`[DEBUG] Updating Admin State. Role: ${dataManager.currentUser?.role}, isAdmin: ${isAdmin}`);
+    // console.log(`[DEBUG] Updating Admin State. Role: ${dataManager.currentUser?.role}, isAdmin: ${isAdmin}`);
 
     // Refresh Logic 
     renderTimetable();
@@ -2074,10 +2208,22 @@ function updateAdminState() {
         adminSidebarBtn.style.display = isMaster && isAdmin ? 'flex' : 'none';
     }
 
-    // Toggle Dashboard Stats Grid
+    // Toggle Dashboard Stats Grid (Admin only)
     const statsGrid = document.getElementById('dashboardStatsGrid');
     if (statsGrid) {
         statsGrid.style.display = isAdmin ? 'grid' : 'none';
+    }
+
+    // Toggle Teacher Stats Grid (Non-Admin only)
+    const teacherStatsGrid = document.getElementById('teacherStatsGrid');
+    if (teacherStatsGrid) {
+        // Show if logged in AND not admin
+        if (dataManager.currentUser && !isAdmin) {
+            teacherStatsGrid.style.display = 'grid';
+            updateTeacherDashboardStats();
+        } else {
+            teacherStatsGrid.style.display = 'none';
+        }
     }
 
     // Toggle Greeting Edit Button
@@ -2120,6 +2266,7 @@ function initGreeting() {
 // ==========================================
 let tempBaseSchedule = [];
 let currentBaseLocation = '체육관';
+let isBulkMode = false;
 
 window.showBaseScheduleEditor = () => {
     document.getElementById('baseScheduleModal').style.display = 'block';
@@ -2133,6 +2280,16 @@ window.showBaseScheduleEditor = () => {
     const tabs = document.querySelectorAll('#baseScheduleModal .tab-btn');
     tabs.forEach(t => t.classList.remove('active'));
     tabs[0].classList.add('active'); // First one (Gym)
+
+    // Reset Bulk Mode
+    isBulkMode = false;
+    document.getElementById('bulkClassSelect').style.display = 'none';
+    const bulkBtn = document.getElementById('bulkToggleBtn');
+    if (bulkBtn) {
+        bulkBtn.classList.remove('active', 'btn-primary');
+        bulkBtn.classList.add('btn-outline');
+        bulkBtn.innerHTML = '<i data-lucide="layers" style="width: 14px; margin-right: 4px;"></i> 일괄 등록';
+    }
 
     renderBaseScheduleGrid('체육관');
 };
@@ -2155,32 +2312,102 @@ window.renderBaseScheduleGrid = (loc) => {
     table.style.minWidth = '600px';
 
     // Header
+    // Style Injection for Centering & Bulk Checkbox
+    if (!document.getElementById('baseScheduleStyles')) {
+        const style = document.createElement('style');
+        style.id = 'baseScheduleStyles';
+        style.innerHTML = `
+            .base-schedule-cell { position: relative; }
+            .base-input { text-align: center; text-align-last: center; }
+            .base-checkbox-overlay {
+                position: absolute;
+                top: 0; left: 0; width: 100%; height: 100%;
+                background: rgba(255, 255, 255, 0.5);
+                display: flex; justify-content: flex-end; align-items: flex-start;
+                padding: 4px;
+                cursor: pointer;
+                border: 2px solid transparent;
+            }
+            .base-checkbox-overlay:hover {
+                background: rgba(255, 255, 255, 0.2);
+                border-color: #3b82f6;
+            }
+            .bulk-check {
+                width: 18px; height: 18px;
+                cursor: pointer;
+            }
+            th { text-align: center !important; }
+        `;
+        document.head.appendChild(style);
+    }
+
     const days = ['월요일', '화요일', '수요일', '목요일', '금요일'];
-    let thead = '<thead><tr><th style="width: 80px;">교시</th>';
-    days.forEach(d => thead += `<th>${d}</th>`);
+    let thead = '<thead><tr><th style="width: 80px; text-align: center;">교시</th>';
+    days.forEach(d => thead += `<th style="text-align: center;">${d}</th>`);
     thead += '</tr></thead>';
 
     // Body
     let tbody = '<tbody>';
     const periods = ['1교시', '2교시', '3교시', '4교시', '점심시간', '5교시', '6교시'];
 
+    // Get Bulk Target Class
+    const bulkSelect = document.getElementById('bulkClassSelect');
+    const bulkTarget = bulkSelect ? bulkSelect.value : '';
+
     periods.forEach(p => {
-        tbody += `<tr><td style="font-weight:bold; text-align:center;">${p}</td>`;
+        tbody += `<tr><td style="font-weight:bold; text-align:center; vertical-align: middle;">${p}</td>`;
         days.forEach(d => {
             // Find existing in temp buffer
             const found = tempBaseSchedule.find(s => s.day === d && s.period === p && s.location === loc);
             const val = found ? found.class : '';
 
+            let inputHtml = '';
+            if (p === '점심시간') {
+                inputHtml = `<input type="text" 
+                            class="base-input" 
+                            data-day="${d}" 
+                            data-period="${p}" 
+                            data-loc="${loc}" 
+                            value="${val}" 
+                            placeholder="-"
+                            style="width: 100%; border: none; padding: 12px; text-align: center; background: transparent;">`;
+            } else {
+                // Generate Options
+                let options = '<option value="">-</option>';
+                // Populate from Admins (Users)
+                // Filter out 'pending' users if desired, but mostly just all users
+                const users = dataManager.admins || [];
+                // Sort by ID naturally (e.g. 1-1, 1-2...)
+                users.slice().sort((a, b) => a.id.localeCompare(b.id, 'en', { numeric: true })).forEach(u => {
+                    if (u.status !== 'pending') { // Only approved users
+                        const selected = val === u.id ? 'selected' : '';
+                        options += `<option value="${u.id}" ${selected}>${u.id}</option>`;
+                    }
+                });
+
+                inputHtml = `<select class="base-input"
+                            data-day="${d}" 
+                            data-period="${p}" 
+                            data-loc="${loc}"
+                            style="width: 100%; border: none; padding: 12px; text-align: center; background: transparent; appearance: none; -webkit-appearance: none;">
+                            ${options}
+                            </select>`;
+            }
+
+            // Determine checkbox state
+            let isChecked = false;
+            if (isBulkMode && bulkTarget && val === bulkTarget) {
+                isChecked = true;
+            }
+
             tbody += `
-                <td style="padding: 0;">
-                    <input type="text" 
-                        class="base-input" 
-                        data-day="${d}" 
-                        data-period="${p}" 
-                        data-loc="${loc}" 
-                        value="${val}" 
-                        placeholder="-"
-                        style="width: 100%; border: none; padding: 12px; text-align: center; background: transparent;">
+                <td style="padding: 0;" class="base-schedule-cell">
+                    ${inputHtml}
+                    ${isBulkMode ? `
+                        <div class="base-checkbox-overlay" onclick="handleBulkCheck('${d}', '${p}', '${loc}', this)">
+                            <input type="checkbox" class="bulk-check" ${isChecked ? 'checked' : ''} style="pointer-events: none;">
+                        </div>
+                    ` : ''}
                 </td>
             `;
         });
@@ -2209,6 +2436,77 @@ window.renderBaseScheduleGrid = (loc) => {
             }
         });
     });
+    if (window.lucide) lucide.createIcons();
+};
+
+window.toggleBulkRegistration = () => {
+    isBulkMode = !isBulkMode;
+    const btn = document.getElementById('bulkToggleBtn');
+    const select = document.getElementById('bulkClassSelect');
+
+    if (isBulkMode) {
+        // Activate
+        btn.classList.remove('btn-outline');
+        btn.classList.add('btn-primary', 'active');
+        btn.innerHTML = '<i data-lucide="check" style="width: 14px; margin-right: 4px;"></i> 등록 종료';
+        select.style.display = 'inline-block';
+
+        // Populate Select if empty
+        if (select.options.length <= 1) {
+            const users = dataManager.admins || [];
+            users.slice().sort((a, b) => a.id.localeCompare(b.id, 'en', { numeric: true })).forEach(u => {
+                if (u.status !== 'pending') {
+                    const opt = document.createElement('option');
+                    opt.value = u.id;
+                    opt.innerText = u.id;
+                    select.appendChild(opt);
+                }
+            });
+        }
+    } else {
+        // Deactivate
+        btn.classList.remove('btn-primary', 'active');
+        btn.classList.add('btn-outline');
+        btn.innerHTML = '<i data-lucide="layers" style="width: 14px; margin-right: 4px;"></i> 일괄 등록';
+        select.style.display = 'none';
+        select.value = ""; // Reset selection
+    }
+
+    // Add Listener for Select Change to re-render checkboxes
+    if (!select.getAttribute('data-listened')) {
+        select.addEventListener('change', () => renderBaseScheduleGrid(currentBaseLocation));
+        select.setAttribute('data-listened', 'true');
+    }
+
+    renderBaseScheduleGrid(currentBaseLocation);
+};
+
+window.handleBulkCheck = (day, period, loc, overlay) => {
+    const select = document.getElementById('bulkClassSelect');
+    const targetClass = select.value;
+
+    if (!targetClass) {
+        alert('일괄 등록할 학반을 먼저 선택해주세요.');
+        select.focus();
+        return;
+    }
+
+    const checkbox = overlay.querySelector('input[type="checkbox"]');
+    const isChecked = !checkbox.checked; // Toggle state because we clicked overlay
+
+    // Update Data
+    // Remove existing
+    tempBaseSchedule = tempBaseSchedule.filter(s => !(s.day === day && s.period === period && s.location === loc));
+
+    // Add new if checked (set to target class)
+    if (isChecked) {
+        tempBaseSchedule.push({ day, period, location: loc, class: targetClass });
+    }
+    // If unchecked, it remains removed (empty)
+
+    // Re-render to show update (and update underlying input/select)
+    // Optimization: Just update visuals if performance is key, but re-render is safer for syncing inputs.
+    renderBaseScheduleGrid(loc);
 };
 
 window.saveBaseSchedule = async () => {
@@ -2616,11 +2914,240 @@ window.switchTab = (tabId) => {
     }
 };
 
+// Helper for Pending Approval Modal
+window.processApproval = (id, isApproved) => {
+    // Close the pending list modal first? 
+    // Actually, approveAndClose/deleteAndClose might expect to be called from detailed modal?
+    // They generally use dataManager to find the item.
+    // However, they might try to manipulate 'modal' (which is the same global modal).
+    // If I am in "Pending List" modal, calling these might overwrite the modal content with "Confirm Delete" or "Conflict" content.
+    // This is DESIRED behavior (flow: List -> Confirm/Action -> Result).
+
+    if (isApproved) {
+        approveAndClose(id);
+    } else {
+        deleteAndClose(id);
+    }
+};
+
+// 2. My Reservations Modal (New)
+window.showMyReservationsModal = () => {
+    if (!dataManager.currentUser) return;
+    const myId = dataManager.currentUser.id;
+
+    // Filter my bookings (active)
+    const myBookings = (dataManager.weeklySchedule || [])
+        .filter(s => s.class === myId && (s.status === '대기' || s.status === '승인' || s.status === '승인됨'));
+
+    // Sort by Date
+    myBookings.sort((a, b) => new Date(a.date) - new Date(b.date));
+
+    const modal = document.getElementById('modal');
+    if (!modal) return;
+    modal.style.display = 'block';
+
+    const form = document.getElementById('modalForm');
+    document.getElementById('modalTitle').innerText = '내 예약 관리 (이번 주)';
+
+    if (myBookings.length === 0) {
+        form.innerHTML = `
+            <div style="text-align: center; padding: 2rem;">
+                <p style="color: var(--text-muted);">이번 주 예약 내역이 없습니다.</p>
+            </div>
+            <div class="modal-actions">
+                <button type="button" class="btn" onclick="closeModal()">닫기</button>
+            </div>
+        `;
+        return;
+    }
+
+    let listHtml = '<div class="return-list" style="max-height: 400px; overflow-y: auto;">';
+    myBookings.forEach(p => {
+        // Fix for Timezone issue
+        const d = new Date(p.date);
+        const year = d.getFullYear();
+        const month = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        const dateStr = `${year}-${month}-${day}`;
+        const dayName = ['일', '월', '화', '수', '목', '금', '토'][d.getDay()];
+
+        const statusBadge = p.status === '승인' || p.status === '승인됨'
+            ? '<span class="badge badge-done">승인됨</span>'
+            : '<span class="badge badge-pending">대기중</span>';
+
+        listHtml += `
+            <div class="return-item" style="display: flex; justify-content: space-between; align-items: center; padding: 0.75rem; border-bottom: 1px solid var(--border);">
+                <div style="width: 100%;">
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+                        <span class="badge" style="background: #f1f5f9; color: #475569;">${dateStr} (${dayName})</span>
+                        <span class="badge" style="background: #e0f2fe; color: #0369a1;">${p.location}</span>
+                    </div>
+                    <div style="font-weight: 600; font-size: 1.1rem; margin-bottom: 0.5rem;">
+                        ${p.period} - ${statusBadge}
+                    </div>
+                    
+                    <div style="display: flex; gap: 0.5rem; margin-top: 1rem; justify-content: flex-end;">
+                        <button class="btn btn-sm btn-danger" onclick="cancelMyBooking(${p.id})">예약 취소</button>
+                    </div>
+                </div>
+            </div>
+        `;
+    });
+    listHtml += '</div>';
+
+    // Add Close Button
+    listHtml += `
+        <div class="modal-actions" style="border-top: 1px solid var(--border); margin-top: 1rem; padding-top: 1rem;">
+             <button type="button" class="btn" onclick="closeModal()">닫기</button>
+        </div>
+    `;
+
+    form.innerHTML = listHtml;
+};
+
+// 3. Cancel My Booking Logic
+window.cancelMyBooking = async (id) => {
+    if (!confirm('정말 이 예약을 취소하시겠습니까? (기본 시간표로 돌아갑니다)')) return;
+
+    await dataManager.sync('deleteBooking', { id });
+    dataManager.sync('logActivity', { message: `${dataManager.currentUser.id}이 예약을 취소했습니다.` });
+
+    // Refresh UI
+    showMyReservationsModal(); // Refresh the list in the modal
+    renderTimetable();
+    renderDashboardWeekly();
+    updateDashboardStats();
+    updateTeacherDashboardStats();
+
+    alert('예약이 취소되었습니다.');
+};
+
+// 4. My Unreturned Items Modal (New)
+window.showMyRentalsModal = () => {
+    if (!dataManager.currentUser) return;
+    const myId = dataManager.currentUser.id;
+
+    // Aggregate my unreturned rentals across all inventory items
+    const myRentals = [];
+    if (dataManager.inventory) {
+        dataManager.inventory.forEach(item => {
+            (item.rentals || []).forEach(r => {
+                if (r.class === myId && !r.returned) {
+                    myRentals.push({
+                        ...r,
+                        itemName: item.name,
+                        itemId: item.id
+                    });
+                }
+            });
+        });
+    }
+
+    // Sort by Date (Recent first?) or Oldest first? Oldest first to encourage return.
+    myRentals.sort((a, b) => new Date(a.date) - new Date(b.date));
+
+    const modal = document.getElementById('modal');
+    if (!modal) return;
+    modal.style.display = 'block';
+
+    const form = document.getElementById('modalForm');
+    document.getElementById('modalTitle').innerText = '내 미반납 비품 관리';
+
+    if (myRentals.length === 0) {
+        form.innerHTML = `
+            <div style="text-align: center; padding: 2rem;">
+                <i data-lucide="check-circle" style="width: 48px; height: 48px; color: #10b981; margin-bottom: 1rem;"></i>
+                <p style="color: var(--text-muted);">현재 미반납된 비품이 없습니다.</p>
+            </div>
+            <div class="modal-actions">
+                <button type="button" class="btn" onclick="closeModal()">닫기</button>
+            </div>
+        `;
+        if (window.lucide) lucide.createIcons();
+        return;
+    }
+
+    let listHtml = '<div class="return-list" style="max-height: 400px; overflow-y: auto;">';
+    myRentals.forEach(r => {
+        // Fix for Timezone issue
+        const d = new Date(r.date);
+        const month = d.getMonth() + 1;
+        const day = d.getDate();
+        const dayName = ['일', '월', '화', '수', '목', '금', '토'][d.getDay()];
+        const dateStr = `${month}월 ${day}일 (${dayName})`;
+
+        listHtml += `
+            <div class="return-item" style="display: flex; justify-content: space-between; align-items: center; padding: 0.75rem; border-bottom: 1px solid var(--border);">
+                <div style="width: 100%;">
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+                        <span class="badge" style="background: #fff1f2; color: #be123c;">${dateStr} 대여</span>
+                        <span class="badge" style="background: #f1f5f9; color: #475569;">${r.count}개</span>
+                    </div>
+                    <div style="font-weight: 600; font-size: 1.1rem; margin-bottom: 0.5rem;">
+                        ${r.itemName}
+                    </div>
+                    
+                    <div style="display: flex; gap: 0.5rem; margin-top: 1rem; justify-content: flex-end;">
+                        <button class="btn btn-sm btn-primary" onclick="returnMyRental(${r.itemId}, ${r.id})">반납하기</button>
+                    </div>
+                </div>
+            </div>
+        `;
+    });
+    listHtml += '</div>';
+
+    // Add Close Button
+    listHtml += `
+        <div class="modal-actions" style="border-top: 1px solid var(--border); margin-top: 1rem; padding-top: 1rem;">
+             <button type="button" class="btn" onclick="closeModal()">닫기</button>
+        </div>
+    `;
+
+    form.innerHTML = listHtml;
+    if (window.lucide) lucide.createIcons();
+};
+
+// 5. Return My Rental Logic (New)
+window.returnMyRental = async (itemId, rentalId) => {
+    const item = dataManager.inventory.find(i => i.id == itemId);
+    const rental = item ? item.rentals.find(r => r.id == rentalId) : null;
+
+    if (!item || !rental) {
+        alert('대여 정보를 찾을 수 없습니다.');
+        return;
+    }
+
+    if (!confirm(`${item.name} (${rental.count}개)를 반납하시겠습니까?`)) return;
+
+    await dataManager.sync('returnItem', { rentalId });
+
+    // Log Activity
+    const msg = `${dataManager.currentUser.id}이 ${item.name} ${rental.count}개를 반납했습니다.`;
+    dataManager.sync('logActivity', { message: msg });
+
+    // Update UI
+    initInventory(); // Refresh inventory list
+    updateDashboardStats(); // Refresh admin stats
+    updateTeacherDashboardStats(); // Refresh teacher stats
+    showMyRentalsModal(); // Refresh modal list
+    renderRecentActivity(); // Refresh activity log
+
+    alert('반납되었습니다.');
+};
+
 // 1. Pending Timetable Approvals Modal
 window.showPendingApprovalsModal = () => {
-    const pendings = dataManager.weeklySchedule.filter(s => s.status === '대기');
+    // Determine target list: All pending bookings
+    let pendings = (dataManager.weeklySchedule || []).filter(s => s.status === '대기');
 
+    // Filter by permission (Admin sees all, Teacher sees only owned/related)
+    // canApproveBooking logic is now updated to handle both Admin and Owner
+    pendings = pendings.filter(s => canApproveBooking(s));
+
+    const modal = document.getElementById('modal');
+    if (!modal) return;
     modal.style.display = 'block';
+
     const form = document.getElementById('modalForm');
     document.getElementById('modalTitle').innerText = '대기중인 시간표 승인';
 
@@ -2637,35 +3164,50 @@ window.showPendingApprovalsModal = () => {
     }
 
     let listHtml = '<div class="return-list" style="max-height: 400px; overflow-y: auto;">';
+
+    // Sort logic (optional: by date/period)
+    pendings.sort((a, b) => new Date(a.date) - new Date(b.date));
+
     pendings.forEach(p => {
-        let displayDate = p.date;
-        if (p.date && p.date.includes('T')) {
-            const d = new Date(p.date);
-            const year = d.getFullYear();
-            const month = String(d.getMonth() + 1).padStart(2, '0');
-            const day = String(d.getDate()).padStart(2, '0');
-            displayDate = `${year}-${month}-${day}`;
-        }
+        // Fix for Timezone issue: Parse ISO string to Date object and get local date components
+        const d = new Date(p.date);
+        const year = d.getFullYear();
+        const month = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        const dateStr = `${year}-${month}-${day}`;
+        const dayName = ['일', '월', '화', '수', '목', '금', '토'][d.getDay()];
 
         listHtml += `
             <div class="return-item" style="display: flex; justify-content: space-between; align-items: center; padding: 0.75rem; border-bottom: 1px solid var(--border);">
-                <div>
-                    <div style="font-weight: 600;">${displayDate} (${p.period})</div>
-                    <div style="font-size: 0.9rem; color: var(--text-muted);">${p.location} - ${p.class}</div>
+                <div style="width: 100%;">
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+                        <span class="badge" style="background: #f1f5f9; color: #475569;">${dateStr} (${dayName})</span>
+                        <span class="badge" style="background: #e0f2fe; color: #0369a1;">${p.location}</span>
+                    </div>
+                    <div style="font-weight: 600; font-size: 1.1rem; margin-bottom: 0.5rem;">
+                        ${p.period} - ${p.class}
+                    </div>
+                    ${p.content ? `<div style="font-size: 0.9rem; color: #666; background: #f8fafc; padding: 0.5rem; border-radius: 4px;">사유: ${p.content}</div>` : ''}
+                    
+                    <div style="display: flex; gap: 0.5rem; margin-top: 1rem; justify-content: flex-end;">
+                        <button class="btn btn-sm btn-outline" onclick="processApproval(${p.id}, false)">거절</button>
+                        <button class="btn btn-sm btn-primary" onclick="processApproval(${p.id}, true)">승인</button>
+                    </div>
                 </div>
-                <button type="button" class="btn btn-primary btn-sm" onclick="approveAndClose(${p.id})">승인</button>
             </div>
         `;
     });
+
     listHtml += '</div>';
 
-    form.innerHTML = `
-        ${listHtml}
-        <div class="modal-actions">
-            <button type="button" class="btn" style="background: #f1f5f9;" onclick="switchTab('timetable')">시간표 관리로 이동</button>
-            <button type="button" class="btn" onclick="closeModal()">닫기</button>
+    // Add Close Button
+    listHtml += `
+        <div class="modal-actions" style="border-top: 1px solid var(--border); margin-top: 1rem; padding-top: 1rem;">
+             <button type="button" class="btn" onclick="closeModal()">닫기</button>
         </div>
     `;
+
+    form.innerHTML = listHtml;
     form.onsubmit = (e) => e.preventDefault();
 };
 
@@ -2871,12 +3413,14 @@ let currentBulkRequester = ''; // Store the requester name
 
 // New Button Handler (Replaces Toggle)
 window.openBulkRentalModal = () => {
-    // Prompt first
-    const name = prompt("신청자(학년-반 또는 동아리명)를 먼저 입력해주세요:", "");
-    if (name && name.trim()) {
-        currentBulkRequester = name.trim();
-        showBulkRentalModal();
+    // Auto-fill from User
+    if (!dataManager.currentUser) {
+        alert('로그인이 필요합니다.');
+        return;
     }
+    const name = dataManager.currentUser.id + (dataManager.currentUser.name ? ' ' + dataManager.currentUser.name : '');
+    currentBulkRequester = name;
+    showBulkRentalModal();
 };
 
 /* Deprecated Toggle Logic (Kept for safety but unused) */
@@ -3183,6 +3727,11 @@ window.showBulkReturnModal = () => {
                     // Check 'class' first, then legacy 'requester'
                     let name = r.class || r.requester;
 
+                    // Permission Check: If not admin, only show own class
+                    if (!isAdminMode() && dataManager.currentUser) {
+                        if (name !== dataManager.currentUser.id) return;
+                    }
+
                     // Filter out bad data (dates, empty strings)
                     if (name && typeof name === 'string' && name.length < 20 && !dateRegex.test(name)) {
                         activeClasses.add(name);
@@ -3193,6 +3742,8 @@ window.showBulkReturnModal = () => {
     });
 
     select.innerHTML = '<option value="">반납할 학급 선택 (대여 중인 반만 표시됨)</option>';
+    select.disabled = false; // Reset disabled state (default)
+
     if (activeClasses.size === 0) {
         const opt = document.createElement('option');
         opt.text = "(현재 대여 중인 학급이 없습니다)";
@@ -3212,6 +3763,15 @@ window.showBulkReturnModal = () => {
     document.getElementById('bulkReturnItemBody').innerHTML = '';
     document.getElementById('bulkReturnTargetDisplay').innerText = '반납자: 학급을 선택해주세요';
     renderBulkReturnCart();
+
+    // Auto-select and lock for non-admin users
+    if (!isAdminMode() && dataManager.currentUser) {
+        if (activeClasses.has(dataManager.currentUser.id)) {
+            select.value = dataManager.currentUser.id;
+            select.disabled = true; // Lock the dropdown
+            onBulkReturnClassChange(); // Load list immediately
+        }
+    }
 };
 
 window.closeBulkReturnModal = () => {

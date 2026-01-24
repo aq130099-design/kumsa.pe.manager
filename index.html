@@ -140,6 +140,23 @@
                     </div>
                 </div>
 
+                <!-- Teacher Dashboard Stats (New) -->
+                <div class="stats-grid" id="teacherStatsGrid"
+                    style="display: none; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1rem; margin-bottom: 2rem;">
+                    <div class="stat-card" onclick="showPendingApprovalsModal()" style="cursor: pointer;">
+                        <h3>내 승인 대기 목록</h3>
+                        <p class="value alarm" id="teacherPendingApprovals">0건</p>
+                    </div>
+                    <div class="stat-card" onclick="showMyReservationsModal()" style="cursor: pointer;">
+                        <h3>내 예약 관리 (이번 주)</h3>
+                        <p class="value" id="teacherMyReservations" style="color: #2563eb;">0건</p>
+                    </div>
+                    <div class="stat-card" onclick="showMyRentalsModal()" style="cursor: pointer;">
+                        <h3>내 미반납 비품</h3>
+                        <p class="value alarm" id="teacherUnreturnedItems">0개</p>
+                    </div>
+                </div>
+
                 <!-- Weekly Facility Schedule Section -->
                 <div class="weekly-scheduler-section"
                     style="background: white; border-radius: 12px; border: 1px solid #e2e8f0; padding: 1.5rem; margin-bottom: 2.5rem; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);">
@@ -548,10 +565,23 @@
                 <h2 id="baseModalTitle">기본 시간표 설정</h2>
             </div>
 
-            <div class="tabs" style="margin-bottom: 1rem;">
-                <button class="tab-btn active" onclick="switchBaseLocation('체육관', this)">체육관</button>
-                <button class="tab-btn" onclick="switchBaseLocation('실내 체육실', this)">실내 체육실</button>
-                <button class="tab-btn" onclick="switchBaseLocation('운동장', this)">운동장</button>
+            <div class="tabs"
+                style="margin-bottom: 1rem; display: flex; justify-content: space-between; align-items: center;">
+                <div style="display: flex; gap: 0.5rem;">
+                    <button class="tab-btn active" onclick="switchBaseLocation('체육관', this)">체육관</button>
+                    <button class="tab-btn" onclick="switchBaseLocation('실내 체육실', this)">실내 체육실</button>
+                    <button class="tab-btn" onclick="switchBaseLocation('운동장', this)">운동장</button>
+                </div>
+                <div class="bulk-controls" style="display: flex; gap: 0.5rem; align-items: center;">
+                    <select id="bulkClassSelect"
+                        style="display: none; padding: 0.4rem; border: 1px solid #cbd5e1; border-radius: 6px;">
+                        <option value="">일괄 등록 학급 선택</option>
+                        <!-- Populated by JS -->
+                    </select>
+                    <button id="bulkToggleBtn" class="btn btn-outline btn-sm" onclick="toggleBulkRegistration()">
+                        <i data-lucide="layers" style="width: 14px; margin-right: 4px;"></i> 일괄 등록
+                    </button>
+                </div>
             </div>
 
             <div id="baseScheduleGrid" style="overflow-x: auto;">
